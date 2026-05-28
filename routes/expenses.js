@@ -14,9 +14,10 @@ const EXPENSE_SELECT = `
   SELECT
     e.id, e.exp_date, e.exp_type, e.method, e.amount, e.comment,
     e.driver_id, e.car_number, e.created_by, e.created_at,
-    d.full_name AS driver_name
+    u.full_name AS driver_name
   FROM expenses e
   LEFT JOIN drivers d ON d.id = e.driver_id
+  LEFT JOIN users u ON u.id = d.user_id
 `;
 
 router.get('/', (req, res) => {

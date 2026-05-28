@@ -8,10 +8,11 @@ router.use(authMiddleware, requireRole('admin'));
 const PAYMENT_SELECT = `
   SELECT
     p.id, p.driver_id, p.type, p.amount, p.note, p.created_by, p.created_at,
-    d.full_name AS driver_name,
+    u.full_name AS driver_name,
     d.car_number AS driver_car_number
   FROM driver_payments p
   JOIN drivers d ON d.id = p.driver_id
+  JOIN users u ON u.id = d.user_id
 `;
 
 router.get('/payments', (req, res) => {
@@ -117,13 +118,14 @@ router.get('/debts', (_req, res) => {
     .prepare(
       `SELECT
          d.id AS driver_id,
-         d.full_name AS driver_name,
+         u.full_name AS driver_name,
          d.car_number AS driver_car_number,
          COALESCE(fin.income, 0) - COALESCE(fin.expense, 0) AS gross,
          COALESCE(pay.paid, 0) AS paid,
          COALESCE(pay.deducted, 0) AS deducted,
          (COALESCE(fin.income, 0) - COALESCE(fin.expense, 0)) + COALESCE(pay.deducted, 0) - COALESCE(pay.paid, 0) AS debt
        FROM drivers d
+       JOIN users u ON u.id = d.user_id
        LEFT JOIN (
          SELECT
            driver_id,
@@ -140,7 +142,7 @@ router.get('/debts', (_req, res) => {
          FROM driver_payments
          GROUP BY driver_id
        ) pay ON pay.driver_id = d.id
-       ORDER BY debt DESC, d.full_name ASC`
+       ORDER BY debt DESC, u.full_name ASC`
     )
     .all();
   return res.json(rows);

@@ -13,10 +13,11 @@ function getDriverIdForUser(userId) {
 const FINANCE_SELECT = `
   SELECT
     f.id, f.driver_id, f.type, f.amount, f.description, f.order_id, f.created_at,
-    d.full_name AS driver_name,
+    u.full_name AS driver_name,
     d.car_number AS driver_car_number
   FROM finances f
   JOIN drivers d ON d.id = f.driver_id
+  JOIN users u ON u.id = d.user_id
 `;
 
 router.get('/', (req, res) => {
