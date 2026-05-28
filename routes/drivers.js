@@ -112,6 +112,35 @@ router.put('/:id', requireRole('admin'), (req, res) => {
   return res.json(updated);
 });
 
+router.put('/profile/me', (req, res) => {
+  if (req.user.role !== 'driver') {
+    return res.status(403).json({ error: 'Только для водителей' });
+  }
+  const own = db.prepare('SELECT id, user_id FROM drivers WHERE user_id = ?').get(req.user.id);
+  if (!own) return res.status(404).json({ error: 'Профиль водителя не найден' });
+  const { full_name, phone, car_number, license_number, license_expiry, medical_check_expiry } = req.body || {};
+  db.prepare('UPDATE users SET full_name = COALESCE(?, full_name), phone = COALESCE(?, phone) WHERE id = ?').run(
+    full_name ? String(full_name).trim() : null,
+    phone ? String(phone).trim() : null,
+    own.user_id
+  );
+  db.prepare(
+    `UPDATE drivers
+     SET car_number = COALESCE(?, car_number),
+         license_number = COALESCE(?, license_number),
+         license_expiry = COALESCE(?, license_expiry),
+         medical_check_expiry = COALESCE(?, medical_check_expiry)
+     WHERE id = ?`
+  ).run(
+    car_number ? String(car_number).trim() : null,
+    license_number ? String(license_number).trim() : null,
+    license_expiry ? String(license_expiry).trim() : null,
+    medical_check_expiry ? String(medical_check_expiry).trim() : null,
+    own.id
+  );
+  return res.json(db.prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`).get(own.id));
+});
+
 router.delete('/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
   const driver = db

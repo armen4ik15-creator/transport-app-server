@@ -27,11 +27,8 @@ ipconfig
 ```
 
 Возьмите `IPv4-адрес` из вашего активного сетевого адаптера (Wi-Fi), например `192.168.1.42`.
-В мобильном приложении (`mobile/config.js`) пропишите:
-
-```js
-export const API_URL = 'http://192.168.1.42:3000/api';
-```
+Либо просто используйте адрес, который сервер сам выводит в консоль при старте:
+`Сервер доступен по адресу: http://<LAN_IP>:3000`
 
 > Телефон и компьютер должны быть в одной Wi-Fi сети.
 > На Windows может потребоваться разрешить входящие соединения на порт 3000 в брандмауэре.
@@ -40,6 +37,7 @@ export const API_URL = 'http://192.168.1.42:3000/api';
 
 | Метод | Путь | Кто |
 |------|------|-----|
+| GET | /api/health | публичный |
 | POST | /api/auth/register | все |
 | POST | /api/auth/login | все |
 | GET | /api/auth/me | авторизованный |
@@ -53,7 +51,18 @@ export const API_URL = 'http://192.168.1.42:3000/api';
 | POST | /api/orders | admin |
 | PUT | /api/orders/:id/status | driver — только свой; admin — любой |
 | POST | /api/orders/:id/photos | multipart (`photo`); driver — только свой |
+| GET/POST | /api/trips | admin: все; driver: только свои |
+| GET | /api/earnings/summary | admin/driver |
+| GET/POST/DELETE | /api/salary/payments | admin |
+| GET | /api/salary/summary | admin |
+| GET | /api/salary/debts | admin |
+| GET/POST/DELETE | /api/contractors/payments | admin |
+| GET | /api/contractors/summary | admin |
+| GET/POST/DELETE | /api/expenses | admin/driver (driver — только свои) |
+| GET | /api/reports/summary | admin/driver |
 
 ## Хранение файлов
 
-Загруженные фото лежат в `server/uploads/` и отдаются как `http://<ip>:3000/uploads/<file>`.
+Загруженные фото лежат в `server/uploads/` и отдаются как:
+- `http://<ip>:3000/uploads/<file>`
+- `http://<ip>:3000/uploads/trips/<file>` для фото рейсов/ТТН

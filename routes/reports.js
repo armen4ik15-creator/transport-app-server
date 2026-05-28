@@ -23,6 +23,8 @@ router.get('/summary', (req, res) => {
         orders_total: 0,
         orders_completed: 0,
         documents_total: 0,
+        expenses_total: 0,
+        expenses_amount: 0,
         income: 0,
         expense: 0,
         balance: 0,
@@ -104,10 +106,36 @@ router.get('/summary', (req, res) => {
     )
     .get(...finParams);
 
+  const expWhere = [];
+  const expParams = [];
+  if (driverId) {
+    expWhere.push('e.driver_id = ?');
+    expParams.push(driverId);
+  }
+  if (from) {
+    expWhere.push("date(e.exp_date) >= date(?)");
+    expParams.push(from);
+  }
+  if (to) {
+    expWhere.push("date(e.exp_date) <= date(?)");
+    expParams.push(to);
+  }
+  const expenses = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS expenses_total,
+         COALESCE(SUM(e.amount), 0) AS expenses_amount
+       FROM expenses e
+       ${expWhere.length ? `WHERE ${expWhere.join(' AND ')}` : ''}`
+    )
+    .get(...expParams);
+
   return res.json({
     orders_total: Number(orders.orders_total || 0),
     orders_completed: Number(orders.orders_completed || 0),
     documents_total: Number(docs.documents_total || 0),
+    expenses_total: Number(expenses.expenses_total || 0),
+    expenses_amount: Number(expenses.expenses_amount || 0),
     income: Number(finances.income || 0),
     expense: Number(finances.expense || 0),
     balance: Number((finances.income || 0) - (finances.expense || 0)),
