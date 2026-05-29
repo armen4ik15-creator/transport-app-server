@@ -98,6 +98,9 @@ function init() {
     throw new Error('PostgreSQL: DATABASE_URL or DB_HOST/DB_USER/DB_PASSWORD required');
   }
 
+  const safeHost = connectionString.replace(/:[^:@/]+@/, ':***@');
+  console.log(`[data] Connecting to PostgreSQL: ${safeHost}`);
+
   const pool = new Pool({
     connectionString,
     ssl: resolveSslConfig(connectionString),
@@ -106,11 +109,16 @@ function init() {
     connectionTimeoutMillis: 15000,
   });
 
-  const db = createDbFacade(pool);
-  waitPromise(pool.query(SCHEMA_SQL));
-  seedAdmin(db);
-  console.log('[data] PostgreSQL connected');
-  return db;
+  try {
+    const db = createDbFacade(pool);
+    waitPromise(pool.query(SCHEMA_SQL));
+    seedAdmin(db);
+    console.log('[data] PostgreSQL connected');
+    return db;
+  } catch (error) {
+    console.error('[data] PostgreSQL init failed:', error.message);
+    throw error;
+  }
 }
 
 module.exports = { init };
