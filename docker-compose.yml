@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    expose:
+      - "3000"
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_HOST: ${DB_HOST:-}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-default_db}
+      DB_USER: ${DB_USER:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DATA_DIR: ${DATA_DIR:-/data}
