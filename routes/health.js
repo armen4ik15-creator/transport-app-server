@@ -2,15 +2,17 @@ const express = require('express');
 const fs = require('fs');
 const db = require('../database');
 const { DB_PATH, DATA_DIR } = require('../config/paths');
-const { buildConnectionString } = require('../database/connection');
+const { buildConnectionString, getPostgresEnvDiagnostics } = require('../database/connection');
 
 const router = express.Router();
 
 router.get('/', (_req, res) => {
+  const env = getPostgresEnvDiagnostics();
   const payload = {
     status: 'ok',
     db_kind: db.kind || 'sqlite',
     data_dir: DATA_DIR,
+    env,
   };
 
   if (db.kind === 'postgres') {
@@ -28,6 +30,10 @@ router.get('/', (_req, res) => {
 
   payload.db_path = DB_PATH;
   payload.db_exists = fs.existsSync(DB_PATH);
+  if (!env.postgres_configured) {
+    payload.hint =
+      'Set DATABASE_URL in App Platform deploy settings, save, then redeploy. Name must be exactly DATABASE_URL.';
+  }
   return res.json(payload);
 });
 

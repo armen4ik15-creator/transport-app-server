@@ -36,8 +36,20 @@ function isPostgresEnabled() {
   return Boolean(buildConnectionString());
 }
 
+function getPostgresEnvDiagnostics() {
+  return {
+    DATABASE_URL: Boolean(process.env.DATABASE_URL),
+    DB_HOST: Boolean(process.env.DB_HOST),
+    DB_USER: Boolean(process.env.DB_USER),
+    DB_PASSWORD: Boolean(process.env.DB_PASSWORD),
+    DB_NAME: Boolean(process.env.DB_NAME),
+    postgres_configured: isPostgresEnabled(),
+  };
+}
+
 module.exports = {
   buildConnectionString,
   resolveSslConfig,
   isPostgresEnabled,
+  getPostgresEnvDiagnostics,
 };
