@@ -93,7 +93,12 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер запущен на порту ${PORT}`);
   console.log(`Health: http://localhost:${PORT}/api/health`);
   console.log(`Data directory: ${require('./config/paths').DATA_DIR}`);
-  console.log(`Database file: ${require('./config/paths').DB_PATH}`);
+  const dbModule = require('./database');
+  if (dbModule.kind === 'postgres') {
+    console.log('Database: PostgreSQL (persistent cloud DB)');
+  } else {
+    console.log(`Database file: ${require('./config/paths').DB_PATH}`);
+  }
   const lanIps = getLocalIpv4Addresses();
   if (lanIps.length > 0) {
     lanIps.forEach((ip) => {
