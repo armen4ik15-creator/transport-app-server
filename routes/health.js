@@ -15,6 +15,15 @@ router.get('/', (_req, res) => {
     env,
   };
 
+  if (db.kind === 'postgres_error') {
+    payload.status = 'degraded';
+    payload.db_connected = false;
+    payload.db_error = db.initError?.message || 'PostgreSQL connection failed';
+    payload.hint =
+      'Reset gen_user password in DB panel, copy the same value to DB_PASSWORD, click Save, redeploy.';
+    return res.json(payload);
+  }
+
   if (db.kind === 'postgres') {
     try {
       db.ping();
@@ -32,7 +41,7 @@ router.get('/', (_req, res) => {
   payload.db_exists = fs.existsSync(DB_PATH);
   if (!env.postgres_configured) {
     payload.hint =
-      'Set DATABASE_URL in App Platform deploy settings, save, then redeploy. Name must be exactly DATABASE_URL.';
+      'Set DB_HOST, DB_USER, DB_PASSWORD in deploy settings, save, then redeploy.';
   }
   return res.json(payload);
 });
