@@ -1,5 +1,7 @@
 node_modules
 uploads
+data.sqlite
 database.sqlite
 .git
 .env
+# database.sqlite хранится на Volume (/data), в образ не включается

@@ -1,9 +1,17 @@
 const path = require('path');
+const fs = require('fs');
 const Database = require('better-sqlite3');
 const { hashPasswordSync } = require('./utils/password');
+const { DB_PATH, ensureDataStorage } = require('./config/paths');
 
-const DB_PATH = path.join(__dirname, 'data.sqlite');
+ensureDataStorage();
+
+if (!fs.existsSync(DB_PATH)) {
+  console.log(`[data] Creating new database at ${DB_PATH}`);
+}
+
 const db = new Database(DB_PATH);
+console.log(`[data] SQLite database: ${DB_PATH}`);
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');

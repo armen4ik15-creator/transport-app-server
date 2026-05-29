@@ -4,7 +4,9 @@ const os = require('os');
 const express = require('express');
 const cors = require('cors');
 const { authMiddleware } = require('./middleware/auth');
+const { UPLOADS_DIR, ensureDataStorage } = require('./config/paths');
 
+ensureDataStorage();
 require('./database');
 
 const healthRoutes = require('./routes/health');
@@ -51,7 +53,7 @@ function getLocalIpv4Addresses() {
 
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
@@ -90,6 +92,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('────────────────────────────────────────');
   console.log(`Сервер запущен на порту ${PORT}`);
   console.log(`Health: http://localhost:${PORT}/api/health`);
+  console.log(`Data directory: ${require('./config/paths').DATA_DIR}`);
+  console.log(`Database file: ${require('./config/paths').DB_PATH}`);
   const lanIps = getLocalIpv4Addresses();
   if (lanIps.length > 0) {
     lanIps.forEach((ip) => {

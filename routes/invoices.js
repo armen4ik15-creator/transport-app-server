@@ -5,12 +5,12 @@ const multer = require('multer');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
+const { uploadsSubdir } = require('../config/paths');
 
 const router = express.Router();
 router.use(authMiddleware);
 
-const INVOICES_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'invoices');
-if (!fs.existsSync(INVOICES_UPLOAD_DIR)) fs.mkdirSync(INVOICES_UPLOAD_DIR, { recursive: true });
+const INVOICES_UPLOAD_DIR = uploadsSubdir('invoices');
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, INVOICES_UPLOAD_DIR),
