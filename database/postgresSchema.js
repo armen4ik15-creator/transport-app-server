@@ -110,18 +110,20 @@ CREATE TABLE IF NOT EXISTS order_templates (
   created_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 
-CREATE TABLE IF NOT EXISTS trips (
-  id SERIAL PRIMARY KEY,
-  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
-  stage TEXT NOT NULL CHECK(stage IN ('loading','unloading')),
-  ttn_number TEXT,
-  volume REAL,
-  note TEXT,
-  photo_path TEXT,
-  created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (NOW()::text)
-);
+    CREATE TABLE IF NOT EXISTS trips (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+      stage TEXT NOT NULL CHECK(stage IN ('loading','unloading')),
+      status TEXT CHECK(status IN ('loading','completed')),
+      ttn_number TEXT,
+      volume REAL,
+      note TEXT,
+      photo_path TEXT,
+      created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (NOW()::text),
+      completed_at TEXT
+    );
 
 CREATE TABLE IF NOT EXISTS driver_payments (
   id SERIAL PRIMARY KEY,

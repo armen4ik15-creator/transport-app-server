@@ -29,7 +29,7 @@ router.get('/summary', (req, res) => {
     }
   }
 
-  const tripWhere = [];
+  const tripWhere = ["(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))"];
   const tripParams = [];
   if (driverId) {
     tripWhere.push('t.driver_id = ?');

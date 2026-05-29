@@ -127,12 +127,14 @@ function migrate(db) {
       order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
       driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
       stage TEXT NOT NULL CHECK(stage IN ('loading','unloading')),
+      status TEXT CHECK(status IN ('loading','completed')),
       ttn_number TEXT,
       volume REAL,
       note TEXT,
       photo_path TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS driver_payments (

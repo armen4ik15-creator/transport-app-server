@@ -66,7 +66,7 @@ router.get('/registry', async (req, res) => {
     const driverId = resolveDriverScope(req);
     const vehicleId = req.query.vehicle_id ? Number(req.query.vehicle_id) : null;
 
-    const where = ["t.stage = 'unloading'"];
+    const where = ["(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))"];
     const params = [];
 
     if (driverId) {
@@ -271,7 +271,7 @@ router.get('/earnings', async (req, res) => {
   try {
     const { dateFrom, dateTo } = readDateRange(req);
     const driverId = resolveDriverScope(req);
-    const where = ["t.stage = 'unloading'"];
+    const where = ["(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))"];
     const params = [];
 
     if (driverId) {
