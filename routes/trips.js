@@ -182,7 +182,7 @@ router.get('/summary', (req, res) => {
       `SELECT
          COUNT(*) AS total_trips,
          COALESCE(SUM(t.volume), 0) AS total_volume,
-         COALESCE(SUM(COALESCE(t.volume, 0) * COALESCE(o.driver_rate, 0)), 0) AS estimated_income
+         COALESCE(SUM(COALESCE(o.driver_rate, 0)), 0) AS estimated_income
        FROM trips t
        JOIN orders o ON o.id = t.order_id
        WHERE ${where.join(' AND ')}`

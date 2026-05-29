@@ -285,7 +285,7 @@ router.get('/earnings', async (req, res) => {
         `SELECT
            date(t.created_at) AS row_date,
            u.full_name AS driver_name,
-           (COALESCE(t.volume, 0) * COALESCE(o.driver_rate, 0)) AS amount,
+           COALESCE(o.driver_rate, 0) AS amount,
            t.order_id
          FROM trips t
          JOIN orders o ON o.id = t.order_id

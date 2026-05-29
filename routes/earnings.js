@@ -36,11 +36,11 @@ router.get('/summary', (req, res) => {
     tripParams.push(driverId);
   }
   if (from) {
-    tripWhere.push("date(t.created_at) >= date(?)");
+    tripWhere.push('date(COALESCE(t.completed_at, t.created_at)) >= date(?)');
     tripParams.push(from);
   }
   if (to) {
-    tripWhere.push("date(t.created_at) <= date(?)");
+    tripWhere.push('date(COALESCE(t.completed_at, t.created_at)) <= date(?)');
     tripParams.push(to);
   }
 
@@ -49,7 +49,7 @@ router.get('/summary', (req, res) => {
       `SELECT
          COUNT(*) AS total_trips,
          COALESCE(SUM(t.volume), 0) AS total_volume,
-         COALESCE(SUM(COALESCE(t.volume, 0) * COALESCE(o.driver_rate, 0)), 0) AS estimated_income
+         COALESCE(SUM(COALESCE(o.driver_rate, 0)), 0) AS estimated_income
        FROM trips t
        JOIN orders o ON o.id = t.order_id
        ${tripWhere.length ? `WHERE ${tripWhere.join(' AND ')}` : ''}`
