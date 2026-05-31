@@ -152,8 +152,9 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('  GET    /api/trips             (admin: все, driver: свои)');
   console.log('  POST   /api/trips             (multipart/json, admin/owner)');
   console.log('  GET    /api/photos            (admin: все, driver: свои заказы)');
-  console.log('  GET    /api/export/registry   (Excel реестр перевозок)');
-  console.log('  GET    /api/export/finances   (Excel финансы)');
+  console.log('  GET    /api/export/registry          (Excel реестр перевозок)');
+  console.log('  GET    /api/export/financial-report    (Excel: рейсы + расходы + прибыль)');
+  console.log('  GET    /api/export/finances            (alias financial-report)');
   console.log('  GET    /api/export/expenses   (Excel расходы)');
   console.log('  GET    /api/export/earnings   (Excel начисления)');
   console.log('  GET    /api/export/salary     (Excel зарплата)');
