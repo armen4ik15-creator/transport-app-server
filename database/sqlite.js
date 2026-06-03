@@ -269,6 +269,9 @@ function migrate(db) {
   ensureColumn(db, 'orders', 'total_planned_volume', 'total_planned_volume REAL');
   ensureColumn(db, 'orders', 'created_by', 'created_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
   ensureColumn(db, 'order_photos', 'uploaded_by', 'uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  ensureColumn(db, 'driver_payments', 'method', `method TEXT CHECK(method IN ('cash','noncash'))`);
+  ensureColumn(db, 'driver_payments', 'period_start', 'period_start TEXT');
+  ensureColumn(db, 'driver_payments', 'period_end', 'period_end TEXT');
 }
 
 function seedAdmin(db) {

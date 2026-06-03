@@ -1,6 +1,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const db = require('../database');
+const { buildSalaryTimesheetWorkbook } = require('../utils/salaryExport');
 
 const router = express.Router();
 
@@ -426,64 +427,11 @@ router.get('/salary', async (req, res) => {
   try {
     const { dateFrom, dateTo } = readDateRange(req);
     const driverId = resolveDriverScope(req);
-
-    const driversQuery = driverId
-      ? db
-          .prepare(
-            'SELECT d.id, u.full_name AS driver_name FROM drivers d JOIN users u ON u.id = d.user_id WHERE d.id = ?'
-          )
-          .all(driverId)
-      : db
-          .prepare(
-            'SELECT d.id, u.full_name AS driver_name FROM drivers d JOIN users u ON u.id = d.user_id ORDER BY u.full_name ASC'
-          )
-          .all();
-
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Зарплата');
-    addHeaderRow(sheet, ['Водитель', 'Начислено', 'Удержано', 'К выплате']);
-
-    driversQuery.forEach((driver) => {
-      const financeWhere = ['driver_id = ?'];
-      const financeParams = [driver.id];
-      appendDateFilter(financeWhere, financeParams, 'created_at', dateFrom, dateTo);
-
-      const financeStats = db
-        .prepare(
-          `SELECT
-             COALESCE(SUM(CASE WHEN type = 'income' THEN amount END), 0) AS income,
-             COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS expense
-           FROM finances
-           WHERE ${financeWhere.join(' AND ')}`
-        )
-        .get(...financeParams);
-
-      const paymentWhere = ['driver_id = ?'];
-      const paymentParams = [driver.id];
-      appendDateFilter(paymentWhere, paymentParams, 'created_at', dateFrom, dateTo);
-
-      const paymentStats = db
-        .prepare(
-          `SELECT
-             COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid,
-             COALESCE(SUM(CASE WHEN type = 'deduction' THEN amount END), 0) AS deducted
-           FROM driver_payments
-           WHERE ${paymentWhere.join(' AND ')}`
-        )
-        .get(...paymentParams);
-
-      const accrued = asNumber(financeStats.income) - asNumber(financeStats.expense);
-      const deducted = asNumber(paymentStats.deducted);
-      const paid = asNumber(paymentStats.paid);
-      const toPay = accrued + deducted - paid;
-
-      sheet.addRow([driver.driver_name ?? `#${driver.id}`, accrued, deducted, toPay]);
-    });
-
-    await sendWorkbook(res, workbook, 'зарплатная_ведомость.xlsx');
+    const workbook = buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId });
+    await sendWorkbook(res, workbook, 'зарплатный_табель.xlsx');
   } catch (error) {
     console.error('[export/salary]', error);
-    res.status(500).json({ error: 'Не удалось сформировать зарплатную ведомость' });
+    res.status(500).json({ error: 'Не удалось сформировать зарплатный табель' });
   }
 });
 

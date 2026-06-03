@@ -84,9 +84,19 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     license_expiry,
     medical_check_expiry,
     is_active,
+    password,
   } = req.body || {};
   const driver = db.prepare('SELECT id, user_id FROM drivers WHERE id = ?').get(id);
   if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
+
+  if (password != null && String(password).length > 0) {
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Пароль должен быть от 6 символов' });
+    }
+    const hash = hashPasswordSync(String(password));
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, driver.user_id);
+  }
+
   db.prepare('UPDATE users SET full_name = COALESCE(?, full_name), phone = ? WHERE id = ?').run(
     full_name ?? null,
     phone ?? null,

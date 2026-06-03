@@ -64,23 +64,33 @@ router.delete('/payments/:id', (req, res) => {
   return res.json({ ok: true });
 });
 
+const COMPLETED_TRIP =
+  "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
+
 router.get('/summary', (_req, res) => {
   const rows = db
     .prepare(
       `SELECT
          c.id AS contractor_id,
          c.name AS contractor_name,
-         COALESCE(SUM(CASE WHEN o.status = 'completed' THEN COALESCE(o.amount, 0) END), 0) AS accrued,
+         COALESCE(tr.accrued, 0) AS accrued,
          COALESCE(cp.paid, 0) AS paid,
-         COALESCE(SUM(CASE WHEN o.status = 'completed' THEN COALESCE(o.amount, 0) END), 0) - COALESCE(cp.paid, 0) AS debt
+         COALESCE(tr.accrued, 0) - COALESCE(cp.paid, 0) AS debt
        FROM contractors c
-       LEFT JOIN orders o ON o.contractor_id = c.id
+       LEFT JOIN (
+         SELECT
+           o.contractor_id,
+           SUM(COALESCE(t.volume, 0) * COALESCE(o.company_rate, 0)) AS accrued
+         FROM trips t
+         JOIN orders o ON o.id = t.order_id
+         WHERE ${COMPLETED_TRIP}
+         GROUP BY o.contractor_id
+       ) tr ON tr.contractor_id = c.id
        LEFT JOIN (
          SELECT contractor_id, COALESCE(SUM(amount), 0) AS paid
          FROM contractor_payments
          GROUP BY contractor_id
        ) cp ON cp.contractor_id = c.id
-       GROUP BY c.id, c.name, cp.paid
        ORDER BY debt DESC, c.name ASC`
     )
     .all();

@@ -232,6 +232,10 @@ CREATE INDEX IF NOT EXISTS idx_waybills_order ON waybills(order_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_order ON invoices(order_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
+
+ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS method TEXT CHECK(method IN ('cash','noncash'));
+ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_start TEXT;
+ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_end TEXT;
 `;
 
 module.exports = { SCHEMA_SQL };
