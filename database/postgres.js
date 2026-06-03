@@ -1,9 +1,9 @@
 const deasync = require('deasync');
 const { Pool } = require('pg');
-const { hashPasswordSync } = require('../utils/password');
 const { buildConnectionString, resolveSslConfig } = require('./connection');
 const { normalizeSqlForPostgres } = require('./sqlNormalize');
 const { SCHEMA_SQL } = require('./postgresSchema');
+const { seedDefaultAdmin, seedProductionOwner } = require('./seedUsers');
 
 let txClient = null;
 
@@ -82,14 +82,8 @@ function createDbFacade(pool) {
 }
 
 function seedAdmin(db) {
-  const email = 'admin@test.com';
-  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (exists) return;
-  const hash = hashPasswordSync('admin123');
-  db.prepare(
-    'INSERT INTO users (email, password_hash, role, full_name, phone) VALUES (?, ?, ?, ?, ?)'
-  ).run(email, hash, 'admin', 'Тестовый Администратор', null);
-  console.log('[seed] admin@test.com / admin123 создан');
+  seedDefaultAdmin(db);
+  seedProductionOwner(db);
 }
 
 function init() {

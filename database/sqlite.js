@@ -1,7 +1,7 @@
 const fs = require('fs');
 const Database = require('better-sqlite3');
-const { hashPasswordSync } = require('../utils/password');
 const { DB_PATH, ensureDataStorage } = require('../config/paths');
+const { seedDefaultAdmin, seedProductionOwner } = require('./seedUsers');
 
 function hasColumn(db, table, column) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -275,14 +275,8 @@ function migrate(db) {
 }
 
 function seedAdmin(db) {
-  const email = 'admin@test.com';
-  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (exists) return;
-  const hash = hashPasswordSync('admin123');
-  db.prepare(
-    'INSERT INTO users (email, password_hash, role, full_name, phone) VALUES (?, ?, ?, ?, ?)'
-  ).run(email, hash, 'admin', 'Тестовый Администратор', null);
-  console.log('[seed] admin@test.com / admin123 создан');
+  seedDefaultAdmin(db);
+  seedProductionOwner(db);
 }
 
 function init() {
