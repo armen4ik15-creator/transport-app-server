@@ -108,6 +108,9 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Сервер доступен по адресу: http://127.0.0.1:${PORT}`);
   }
   console.log('Тестовый админ: admin@test.com / admin123');
+  const { getPublicSecurityConfig } = require('./utils/authPolicy');
+  const authCfg = getPublicSecurityConfig();
+  console.log('Auth security:', JSON.stringify(authCfg));
   console.log('Эндпоинты:');
   console.log('  POST   /api/auth/register');
   console.log('  POST   /api/auth/login');
