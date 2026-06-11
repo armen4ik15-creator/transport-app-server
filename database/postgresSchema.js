@@ -236,6 +236,62 @@ CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS method TEXT CHECK(method IN ('cash','noncash'));
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_start TEXT;
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_end TEXT;
+ALTER TABLE contractor_payments ADD COLUMN IF NOT EXISTS payment_date TEXT;
+
+CREATE TABLE IF NOT EXISTS fuel_cards (
+  id SERIAL PRIMARY KEY,
+  driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+  card_number TEXT NOT NULL UNIQUE,
+  label TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS fuel_transactions (
+  id SERIAL PRIMARY KEY,
+  external_id TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL DEFAULT 'mock',
+  card_number TEXT NOT NULL,
+  driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+  transaction_at TEXT NOT NULL,
+  station_name TEXT,
+  amount REAL NOT NULL,
+  liters REAL,
+  car_number TEXT,
+  expense_id INTEGER REFERENCES expenses(id) ON DELETE SET NULL,
+  raw_payload TEXT,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS fuel_settings (
+  id INTEGER PRIMARY KEY,
+  data_source TEXT NOT NULL DEFAULT 'mock',
+  opti_login TEXT,
+  opti_password TEXT,
+  sync_enabled INTEGER NOT NULL DEFAULT 1,
+  sync_interval_minutes INTEGER NOT NULL DEFAULT 5,
+  last_sync_at TEXT,
+  last_sync_status TEXT,
+  last_sync_new_count INTEGER NOT NULL DEFAULT 0,
+  last_sync_error TEXT,
+  updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS fuel_sync_logs (
+  id SERIAL PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL,
+  source TEXT,
+  fetched_count INTEGER NOT NULL DEFAULT 0,
+  created_count INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_fuel_cards_driver ON fuel_cards(driver_id);
+CREATE INDEX IF NOT EXISTS idx_fuel_transactions_driver ON fuel_transactions(driver_id);
+CREATE INDEX IF NOT EXISTS idx_fuel_transactions_date ON fuel_transactions(transaction_at);
+CREATE INDEX IF NOT EXISTS idx_fuel_sync_logs_started ON fuel_sync_logs(started_at);
 `;
 
 module.exports = { SCHEMA_SQL };

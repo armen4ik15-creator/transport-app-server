@@ -7,7 +7,7 @@ router.use(authMiddleware, requireRole('admin'));
 
 const PAYMENT_SELECT = `
   SELECT
-    p.id, p.contractor_id, p.amount, p.note, p.created_by, p.created_at,
+    p.id, p.contractor_id, p.amount, p.note, p.payment_date, p.created_by, p.created_at,
     c.name AS contractor_name
   FROM contractor_payments p
   JOIN contractors c ON c.id = p.contractor_id
@@ -22,13 +22,13 @@ router.get('/payments', (req, res) => {
     params.push(contractorId);
   }
   const rows = db
-    .prepare(`${PAYMENT_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY p.created_at DESC`)
+    .prepare(`${PAYMENT_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY COALESCE(p.payment_date, p.created_at) DESC, p.id DESC`)
     .all(...params);
   return res.json(rows);
 });
 
 router.post('/payments', (req, res) => {
-  const { contractor_id, amount, note } = req.body || {};
+  const { contractor_id, amount, note, payment_date } = req.body || {};
   if (!contractor_id || amount == null) {
     return res.status(400).json({ error: 'contractor_id и amount обязательны' });
   }
@@ -41,13 +41,18 @@ router.post('/payments', (req, res) => {
     return res.status(400).json({ error: 'amount должен быть положительным числом' });
   }
 
+  const safePaymentDate =
+    payment_date && String(payment_date).trim()
+      ? String(payment_date).trim()
+      : new Date().toISOString().slice(0, 10);
+
   const result = db
     .prepare(
       `INSERT INTO contractor_payments
-       (contractor_id, amount, note, created_by)
-       VALUES (?, ?, ?, ?)`
+       (contractor_id, amount, note, payment_date, created_by)
+       VALUES (?, ?, ?, ?, ?)`
     )
-    .run(contractor_id, numericAmount, note || null, req.user.id);
+    .run(contractor_id, numericAmount, note || null, safePaymentDate, req.user.id);
 
   const row = db.prepare(`${PAYMENT_SELECT} WHERE p.id = ?`).get(result.lastInsertRowid);
   return res.status(201).json(row);

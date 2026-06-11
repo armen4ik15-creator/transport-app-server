@@ -8,6 +8,29 @@ const router = express.Router();
 const COMPLETED_TRIP_SQL =
   "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
 
+const EXPENSE_TYPE_LABELS = {
+  fuel_card: 'Пополнение топл. карты',
+  fuel: 'Топливо по карте',
+  repair: 'Ремонт/Шиномонтаж',
+  parts: 'Запчасти/Шины',
+  maintenance: 'ТО и сервис',
+  platon: 'Платон',
+  wash: 'Мойка',
+  toll: 'Платные дороги',
+  fine: 'Штрафы',
+  dps: 'ДПС',
+  lease: 'Аренда/Лизинг',
+  bank_fee: 'Банковские комиссии',
+  other: 'Прочие расходы',
+  salary_other: 'Зарплата (прочая)',
+  dividend: 'Дивиденды',
+};
+
+function expenseTypeLabel(value) {
+  if (!value) return '';
+  return EXPENSE_TYPE_LABELS[value] || value;
+}
+
 const REGISTRY_HEADERS = [
   'Дата',
   '№ ТН',
@@ -279,7 +302,7 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
     expensesSheet.addRow([
       row.row_date ?? '',
       row.driver_name ?? '',
-      row.exp_type ?? '',
+      expenseTypeLabel(row.exp_type),
       amount,
       row.comment ?? '',
     ]);
@@ -383,7 +406,7 @@ router.get('/expenses', async (req, res) => {
       sheet.addRow([
         row.row_date ?? '',
         row.driver_name ?? '',
-        row.exp_type ?? '',
+        expenseTypeLabel(row.exp_type),
         asNumber(row.amount),
         row.comment ?? '',
       ]);
