@@ -1,6 +1,9 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
+const { UPLOADS_DIR } = require('../config/paths');
 
 const router = express.Router();
 
@@ -117,6 +120,30 @@ router.get('/', (req, res) => {
 
   const rows = db.prepare(sql).all(...params, limit, offset);
   return res.json(rows);
+});
+
+/** Отдача файла через /api — работает за reverse-proxy, где /uploads недоступен снаружи. */
+router.get('/file', (req, res) => {
+  const relativePath = req.query.path;
+  if (!relativePath || typeof relativePath !== 'string') {
+    return res.status(400).json({ error: 'path required' });
+  }
+  if (!relativePath.startsWith('/uploads/')) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  const subPath = relativePath.replace(/^\/uploads\/?/, '');
+  if (subPath.includes('..')) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  const absolute = path.join(UPLOADS_DIR, subPath);
+  if (!fs.existsSync(absolute)) {
+    const legacyOrdersPath = path.join(UPLOADS_DIR, 'orders', path.basename(subPath));
+    if (fs.existsSync(legacyOrdersPath)) {
+      return res.sendFile(legacyOrdersPath);
+    }
+    return res.status(404).json({ error: 'File not found' });
+  }
+  return res.sendFile(absolute);
 });
 
 module.exports = router;

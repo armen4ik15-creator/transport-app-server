@@ -3,7 +3,7 @@ const { Pool } = require('pg');
 const { buildConnectionString, resolveSslConfig } = require('./connection');
 const { normalizeSqlForPostgres } = require('./sqlNormalize');
 const { SCHEMA_SQL } = require('./postgresSchema');
-const { seedDefaultAdmin, seedProductionOwner } = require('./seedUsers');
+const { seedDefaultAdmin, seedFounderAdmin } = require('./seedUsers');
 
 let txClient = null;
 
@@ -83,7 +83,7 @@ function createDbFacade(pool) {
 
 function seedAdmin(db) {
   seedDefaultAdmin(db);
-  seedProductionOwner(db);
+  seedFounderAdmin(db);
 }
 
 function init() {

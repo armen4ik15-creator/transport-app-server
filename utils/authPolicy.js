@@ -59,12 +59,29 @@ function validatePasswordResetCode(provided) {
 function getPublicSecurityConfig() {
   const open = isRegistrationOpen();
   const invite = getInviteCode();
+  const resetCodeConfigured = Boolean(getPasswordResetCode());
   return {
     registration_open: open,
     registration_requires_invite: !open && Boolean(invite),
     registration_available: canSelfRegister(),
-    password_reset_available: Boolean(getPasswordResetCode()),
+    admin_registration_available: true,
+    password_reset_available: true,
+    password_reset_requires_code: resetCodeConfigured,
   };
+}
+
+function userCanResetWithoutCode(user) {
+  return Boolean(user && Number(user.password_reset_enabled) === 1);
+}
+
+function validatePasswordResetForUser(user, resetCode) {
+  if (userCanResetWithoutCode(user)) {
+    return null;
+  }
+  if (!validatePasswordResetCode(resetCode)) {
+    return 'Неверный код восстановления';
+  }
+  return null;
 }
 
 function validatePasswordStrength(password) {
@@ -81,4 +98,6 @@ module.exports = {
   validatePasswordStrength,
   validatePasswordResetCode,
   validateRegistrationInvite,
+  userCanResetWithoutCode,
+  validatePasswordResetForUser,
 };

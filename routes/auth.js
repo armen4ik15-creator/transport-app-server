@@ -7,11 +7,22 @@ const {
   canSelfRegister,
   getPublicSecurityConfig,
   validatePasswordStrength,
-  validatePasswordResetCode,
   validateRegistrationInvite,
+  validatePasswordResetForUser,
 } = require('../utils/authPolicy');
+const { notifyOwnerAdmins } = require('./adminRegistrations');
 
 const router = express.Router();
+
+function normalizeRole(role) {
+  const raw = String(role || 'driver').trim().toLowerCase();
+  if (raw === 'founder' || raw === 'admin') return 'admin';
+  return 'driver';
+}
+
+function isAdminRegistrationRole(role) {
+  return role === 'admin';
+}
 
 router.get('/security-config', (_req, res) => {
   return res.json(getPublicSecurityConfig());
@@ -21,7 +32,8 @@ router.post('/register', (req, res) => {
   const {
     email,
     password,
-    role: _ignoredRole,
+    confirm_password,
+    role: roleInput,
     invite_code,
     full_name,
     phone,
@@ -37,6 +49,52 @@ router.post('/register', (req, res) => {
   const passwordError = validatePasswordStrength(password);
   if (passwordError) return res.status(400).json({ error: passwordError });
 
+  const role = normalizeRole(roleInput);
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  if (isAdminRegistrationRole(role)) {
+    if (!full_name || !String(full_name).trim()) {
+      return res.status(400).json({ error: 'full_name обязателен для учредителя' });
+    }
+    if (!confirm_password) {
+      return res.status(400).json({ error: 'confirm_password обязателен' });
+    }
+    if (String(password) !== String(confirm_password)) {
+      return res.status(400).json({ error: 'Пароли не совпадают' });
+    }
+
+    const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
+    if (exists) return res.status(409).json({ error: 'Email уже зарегистрирован' });
+
+    const pending = db
+      .prepare(
+        `SELECT id FROM admin_registration_requests
+         WHERE email = ? AND status = 'pending'`
+      )
+      .get(normalizedEmail);
+    if (pending) {
+      return res.status(409).json({ error: 'Заявка на этот email уже ожидает одобрения' });
+    }
+
+    const hash = hashPasswordSync(password);
+    const result = db
+      .prepare(
+        `INSERT INTO admin_registration_requests
+         (email, password_hash, full_name, phone, status)
+         VALUES (?, ?, ?, ?, 'pending')`
+      )
+      .run(normalizedEmail, hash, String(full_name).trim(), phone || null);
+
+    const requestId = result.lastInsertRowid;
+    const message = `Новая заявка учредителя: ${String(full_name).trim()} (${normalizedEmail})`;
+    notifyOwnerAdmins(message, requestId);
+
+    return res.status(201).json({
+      pending: true,
+      message: 'Ожидайте одобрения главного администратора',
+    });
+  }
+
   if (!canSelfRegister()) {
     return res.status(403).json({
       error: 'Регистрация закрыта. Попросите администратора создать аккаунт.',
@@ -49,14 +107,21 @@ router.post('/register', (req, res) => {
     });
   }
 
-  const normalizedEmail = String(email).trim().toLowerCase();
+  if (confirm_password != null && String(password) !== String(confirm_password)) {
+    return res.status(400).json({ error: 'Пароли не совпадают' });
+  }
+
   const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
   if (exists) return res.status(409).json({ error: 'Email уже зарегистрирован' });
 
   const hash = hashPasswordSync(password);
   const registerUser = db.transaction(() => {
     const u = db
-      .prepare('INSERT INTO users (email, password_hash, role, full_name, phone) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        `INSERT INTO users
+         (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
+         VALUES (?, ?, ?, ?, ?, 1, 0)`
+      )
       .run(normalizedEmail, hash, 'driver', full_name || normalizedEmail, phone || null);
 
     db.prepare(
@@ -88,21 +153,24 @@ router.post('/register', (req, res) => {
 
 router.post('/forgot-password', (req, res) => {
   const { email, reset_code, new_password } = req.body || {};
-  if (!email || !reset_code || !new_password) {
-    return res.status(400).json({ error: 'email, reset_code и new_password обязательны' });
+  if (!email || !new_password) {
+    return res.status(400).json({ error: 'email и new_password обязательны' });
   }
 
   const passwordError = validatePasswordStrength(new_password);
   if (passwordError) return res.status(400).json({ error: passwordError });
 
-  if (!validatePasswordResetCode(reset_code)) {
-    return res.status(403).json({ error: 'Неверный код восстановления' });
-  }
-
   const normalizedEmail = String(email).trim().toLowerCase();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
+  const user = db
+    .prepare('SELECT id, password_reset_enabled FROM users WHERE email = ?')
+    .get(normalizedEmail);
   if (!user) {
     return res.status(404).json({ error: 'Пользователь с таким email не найден' });
+  }
+
+  const resetCodeError = validatePasswordResetForUser(user, reset_code);
+  if (resetCodeError) {
+    return res.status(403).json({ error: resetCodeError });
   }
 
   const hash = hashPasswordSync(new_password);
@@ -139,6 +207,19 @@ router.post('/login', (req, res) => {
     return res.status(400).json({ error: 'email и password обязательны' });
   }
   const normalizedEmail = String(email).trim().toLowerCase();
+
+  const pending = db
+    .prepare(
+      `SELECT id FROM admin_registration_requests
+       WHERE email = ? AND status = 'pending'`
+    )
+    .get(normalizedEmail);
+  if (pending) {
+    return res.status(403).json({
+      error: 'Заявка на регистрацию ожидает одобрения администратора',
+    });
+  }
+
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
   if (!user) return res.status(401).json({ error: 'Неверный email или пароль' });
   if (!comparePasswordSync(password, user.password_hash)) {

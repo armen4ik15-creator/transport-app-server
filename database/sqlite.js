@@ -1,7 +1,7 @@
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const { DB_PATH, ensureDataStorage } = require('../config/paths');
-const { seedDefaultAdmin, seedProductionOwner } = require('./seedUsers');
+const { seedDefaultAdmin, seedFounderAdmin } = require('./seedUsers');
 
 function hasColumn(db, table, column) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -213,6 +213,22 @@ function migrate(db) {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       message TEXT NOT NULL,
       read INTEGER NOT NULL DEFAULT 0,
+      kind TEXT NOT NULL DEFAULT 'general',
+      ref_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_registration_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      phone TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected')),
+      reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TEXT,
+      rejection_reason TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -243,6 +259,9 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_waybills_order ON waybills(order_id);
     CREATE INDEX IF NOT EXISTS idx_invoices_order ON invoices(order_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_reg_pending_email
+      ON admin_registration_requests(email) WHERE status = 'pending';
+    CREATE INDEX IF NOT EXISTS idx_admin_reg_status ON admin_registration_requests(status);
     CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
 
     CREATE TABLE IF NOT EXISTS fuel_cards (
@@ -303,6 +322,10 @@ function migrate(db) {
 
   ensureColumn(db, 'users', 'full_name', 'full_name TEXT');
   ensureColumn(db, 'users', 'phone', 'phone TEXT');
+  ensureColumn(db, 'users', 'password_reset_enabled', 'password_reset_enabled INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'users', 'is_owner', 'is_owner INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'notifications', 'kind', `kind TEXT NOT NULL DEFAULT 'general'`);
+  ensureColumn(db, 'notifications', 'ref_id', 'ref_id INTEGER');
   ensureColumn(db, 'drivers', 'license_number', 'license_number TEXT');
   ensureColumn(db, 'drivers', 'license_expiry', 'license_expiry TEXT');
   ensureColumn(db, 'drivers', 'medical_check_expiry', 'medical_check_expiry TEXT');
@@ -332,7 +355,7 @@ function migrate(db) {
 
 function seedAdmin(db) {
   seedDefaultAdmin(db);
-  seedProductionOwner(db);
+  seedFounderAdmin(db);
 }
 
 function init() {

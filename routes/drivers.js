@@ -49,8 +49,12 @@ router.post('/', requireRole('admin'), (req, res) => {
   const hash = hashPasswordSync(password);
   const createDriver = db.transaction(() => {
     const u = db
-      .prepare('INSERT INTO users (email, password_hash, role, full_name, phone) VALUES (?, ?, ?, ?, ?)')
-      .run(email, hash, 'driver', full_name, phone || null);
+      .prepare(
+        `INSERT INTO users
+         (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
+         VALUES (?, ?, 'driver', ?, ?, 1, 0)`
+      )
+      .run(email, hash, full_name, phone || null);
     const d = db
       .prepare(
         `INSERT INTO drivers

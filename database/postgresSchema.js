@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL CHECK(role IN ('admin','driver')),
   full_name TEXT,
   phone TEXT,
+  password_reset_enabled INTEGER NOT NULL DEFAULT 0,
+  is_owner INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 
@@ -201,6 +203,22 @@ CREATE TABLE IF NOT EXISTS notifications (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   message TEXT NOT NULL,
   "read" INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL DEFAULT 'general',
+  ref_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS admin_registration_requests (
+  id SERIAL PRIMARY KEY,
+  email TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  phone TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','approved','rejected')),
+  reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  rejection_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 
@@ -231,7 +249,15 @@ CREATE INDEX IF NOT EXISTS idx_expenses_driver ON expenses(driver_id);
 CREATE INDEX IF NOT EXISTS idx_waybills_order ON waybills(order_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_order ON invoices(order_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_reg_pending_email
+  ON admin_registration_requests(email) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_admin_reg_status ON admin_registration_requests(status);
 CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'general';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ref_id INTEGER;
 
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS method TEXT CHECK(method IN ('cash','noncash'));
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_start TEXT;

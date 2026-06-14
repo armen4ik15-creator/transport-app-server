@@ -338,7 +338,7 @@ router.post('/:id/photos', upload.single('photo'), (req, res) => {
     fs.unlink(req.file.path, () => {});
     return;
   }
-  const filePath = `/uploads/${req.file.filename}`;
+  const filePath = `/uploads/orders/${req.file.filename}`;
   const r = db
     .prepare('INSERT INTO order_photos (order_id, file_path, uploaded_by) VALUES (?, ?, ?)')
     .run(id, filePath, req.user.id);
