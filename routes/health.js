@@ -10,6 +10,7 @@ router.get('/', (_req, res) => {
   const env = getPostgresEnvDiagnostics();
   const payload = {
     status: 'ok',
+    app_version: process.env.APP_VERSION || '1.2.0',
     db_kind: db.kind || 'sqlite',
     data_dir: DATA_DIR,
     env,

@@ -59,17 +59,30 @@ function seedFounderAdmin(db) {
   const founder = getFounderCredentials();
   migrateLegacyFounderEmail(db, founder.email);
 
-  const hash = hashPasswordSync(String(founder.password));
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(founder.email);
+  const hasExplicitPassword = Boolean(
+    process.env.FOUNDER_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD
+  );
+  const existing = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(founder.email);
 
   if (existing) {
-    db.prepare(
-      `UPDATE users
-       SET password_hash = ?, role = 'admin', full_name = ?, password_reset_enabled = 1, is_owner = 1
-       WHERE id = ?`
-    ).run(hash, founder.fullName, existing.id);
-    console.log(`[seed] founder admin ${founder.email} updated (is_owner=1)`);
+    if (hasExplicitPassword) {
+      const hash = hashPasswordSync(String(founder.password));
+      db.prepare(
+        `UPDATE users
+         SET password_hash = ?, role = 'admin', full_name = ?, password_reset_enabled = 1, is_owner = 1
+         WHERE id = ?`
+      ).run(hash, founder.fullName, existing.id);
+      console.log(`[seed] founder admin ${founder.email} updated (password + is_owner=1)`);
+    } else {
+      db.prepare(
+        `UPDATE users
+         SET role = 'admin', full_name = ?, password_reset_enabled = 1, is_owner = 1
+         WHERE id = ?`
+      ).run(founder.fullName, existing.id);
+      console.log(`[seed] founder admin ${founder.email} updated (is_owner=1, password kept)`);
+    }
   } else {
+    const hash = hashPasswordSync(String(founder.password));
     db.prepare(
       `INSERT INTO users
        (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
