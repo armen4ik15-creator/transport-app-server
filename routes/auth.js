@@ -9,6 +9,7 @@ const {
   validatePasswordStrength,
   validateRegistrationInvite,
   validatePasswordResetForUser,
+  validatePasswordResetCode,
 } = require('../utils/authPolicy');
 const { notifyOwnerAdmins } = require('./adminRegistrations');
 
@@ -177,6 +178,58 @@ router.post('/forgot-password', (req, res) => {
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
 
   return res.json({ ok: true, message: 'Пароль обновлён. Войдите с новым паролем.' });
+});
+
+/** Одноразовая миграция email учредителя (код восстановления = секрет). */
+router.post('/migrate-founder', (req, res) => {
+  const { reset_code, target_email, password, full_name } = req.body || {};
+  if (!reset_code || !target_email || !password) {
+    return res.status(400).json({ error: 'reset_code, target_email и password обязательны' });
+  }
+
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) return res.status(400).json({ error: passwordError });
+
+  if (!validatePasswordResetCode(reset_code)) {
+    return res.status(403).json({ error: 'Неверный код восстановления' });
+  }
+
+  const normalizedEmail = String(target_email).trim().toLowerCase();
+  const taken = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
+  if (taken) {
+    return res.status(409).json({ error: 'Email уже занят' });
+  }
+
+  const owner = db
+    .prepare(
+      `SELECT id, email FROM users
+       WHERE is_owner = 1 OR email IN ('spartakus_dominionus@mail.ru', 'aram_grigoryan96@bk.ru')
+       ORDER BY is_owner DESC, id ASC
+       LIMIT 1`
+    )
+    .get();
+  if (!owner) {
+    return res.status(404).json({ error: 'Учредитель не найден' });
+  }
+
+  const hash = hashPasswordSync(String(password));
+  const displayName = full_name ? String(full_name).trim() : 'Арам Григорян';
+
+  db.prepare(
+    `UPDATE users
+     SET email = ?, password_hash = ?, full_name = ?, role = 'admin',
+         password_reset_enabled = 1, is_owner = 1
+     WHERE id = ?`
+  ).run(normalizedEmail, hash, displayName, owner.id);
+
+  db.prepare('UPDATE users SET is_owner = 0 WHERE id != ? AND is_owner = 1').run(owner.id);
+
+  return res.json({
+    ok: true,
+    message: `Учредитель перенесён на ${normalizedEmail}. Можно входить.`,
+    previous_email: owner.email,
+    user_id: owner.id,
+  });
 });
 
 router.post('/change-password', authMiddleware, (req, res) => {
