@@ -41,8 +41,8 @@ async function apiRequest(method, urlPath, body) {
     method,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -59,6 +59,25 @@ async function apiRequest(method, urlPath, body) {
   return data;
 }
 
+async function fetchLatestCommitSha() {
+  const response = await fetch(
+    'https://api.github.com/repos/armen4ik15-creator/transport-app-server/commits/main'
+  );
+  if (!response.ok) {
+    throw new Error(`GitHub commits/main -> ${response.status}`);
+  }
+  const data = await response.json();
+  if (!data.sha) {
+    throw new Error('GitHub commit sha missing');
+  }
+  return data.sha;
+}
+
+async function fetchCurrentEnvs() {
+  const data = await apiRequest('GET', `/apps/${APP_ID}`, null);
+  return data?.app?.envs && typeof data.app.envs === 'object' ? { ...data.app.envs } : {};
+}
+
 async function main() {
   if (!TOKEN) {
     console.error('[timeweb-deploy] Add TIMEWEB_API_TOKEN to server/timeweb.env');
@@ -69,12 +88,16 @@ async function main() {
     process.exit(1);
   }
 
-  const envs = parseEnvFile(ENV_FILE);
-  console.log(`[timeweb-deploy] Updating app ${APP_ID} (${Object.keys(envs).length} env vars)...`);
+  const fileEnvs = parseEnvFile(ENV_FILE);
+  const currentEnvs = await fetchCurrentEnvs();
+  const envs = { ...currentEnvs, ...fileEnvs };
+  console.log(`[timeweb-deploy] Updating app ${APP_ID} (${Object.keys(envs).length} env vars, merged)...`);
   await apiRequest('PATCH', `/apps/${APP_ID}`, { envs });
 
   console.log('[timeweb-deploy] Starting deploy...');
-  const deploy = await apiRequest('POST', `/apps/${APP_ID}/deploy`, {});
+  const commitSha = process.env.DEPLOY_COMMIT_SHA || (await fetchLatestCommitSha());
+  console.log(`[timeweb-deploy] commit_sha=${commitSha}`);
+  const deploy = await apiRequest('POST', `/apps/${APP_ID}/deploy`, { commit_sha: commitSha });
   console.log('[timeweb-deploy] Deploy triggered:', JSON.stringify(deploy, null, 2));
 }
 
