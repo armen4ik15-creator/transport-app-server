@@ -13,6 +13,6 @@ COPY . .
 
 ENV APP_VERSION=1.2.1
 
-EXPOSE 8000
+EXPOSE 3000
 
 CMD ["node", "server.js"]

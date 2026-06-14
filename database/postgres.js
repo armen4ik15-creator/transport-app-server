@@ -108,12 +108,14 @@ function init() {
   });
 
   try {
+    waitPromise(pool.query('SELECT 1'));
     const db = createDbFacade(pool);
     waitPromise(pool.query(SCHEMA_SQL));
     seedAdmin(db);
     console.log('[data] PostgreSQL connected');
     return db;
   } catch (error) {
+    pool.end().catch(() => {});
     console.error('[data] PostgreSQL init failed:', error.message);
     throw error;
   }

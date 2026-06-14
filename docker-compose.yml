@@ -1,12 +1,12 @@
-version: "3.9"
-
 services:
   app:
     build: .
+    expose:
+      - "3000"
     ports:
-      - "8000:8000"
+      - "8000:3000"
     environment:
-      PORT: "8000"
+      PORT: "3000"
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-}
       DB_HOST: ${DB_HOST:-}
