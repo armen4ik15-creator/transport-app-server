@@ -103,6 +103,10 @@ function init() {
     connectionTimeoutMillis: 15000,
   });
 
+  pool.on('error', (err) => {
+    console.error('[data] PostgreSQL pool error:', err.message);
+  });
+
   try {
     const db = createDbFacade(pool);
     waitPromise(pool.query(SCHEMA_SQL));

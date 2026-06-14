@@ -20,6 +20,12 @@ function createDatabase() {
   return require('./database/sqlite').init();
 }
 
-const db = createDatabase();
+let db;
+try {
+  db = createDatabase();
+} catch (error) {
+  console.error('[data] Fatal database setup:', error.message);
+  db = require('./database/failed').createFailedAdapter(error);
+}
 
 module.exports = db;
