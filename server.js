@@ -1,6 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 const os = require('os');
+const express = require('express');
 const compression = require('compression');
 const cors = require('cors');
 const { authMiddleware } = require('./middleware/auth');
