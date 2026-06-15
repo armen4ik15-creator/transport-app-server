@@ -64,15 +64,20 @@ function ensureOwnerOrAdmin(req, res, order) {
 }
 
 router.get('/', (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+
   if (req.user.role === 'admin') {
-    const rows = db.prepare(`${ORDER_SELECT} ORDER BY o.created_at DESC`).all();
+    const rows = db
+      .prepare(`${ORDER_SELECT} ORDER BY o.created_at DESC LIMIT ? OFFSET ?`)
+      .all(limit, offset);
     return res.json(rows);
   }
   const driverId = getDriverIdForUser(req.user.id);
   if (!driverId) return res.json([]);
   const rows = db
-    .prepare(`${ORDER_SELECT} WHERE o.driver_id = ? ORDER BY o.created_at DESC`)
-    .all(driverId);
+    .prepare(`${ORDER_SELECT} WHERE o.driver_id = ? ORDER BY o.created_at DESC LIMIT ? OFFSET ?`)
+    .all(driverId, limit, offset);
   return res.json(rows);
 });
 

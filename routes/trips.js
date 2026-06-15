@@ -140,11 +140,13 @@ router.get('/', (req, res) => {
     where.push("(t.status = 'loading' OR (t.status IS NULL AND t.stage = 'loading'))");
   }
 
+  const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+
   const rows = db
     .prepare(
-      `${TRIP_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY t.created_at DESC`
+      `${TRIP_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY t.created_at DESC LIMIT ?`
     )
-    .all(...params);
+    .all(...params, limit);
 
   return res.json(rows);
 });

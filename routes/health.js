@@ -6,6 +6,10 @@ const { buildConnectionString, getPostgresEnvDiagnostics } = require('../databas
 
 const router = express.Router();
 
+router.get('/live', (_req, res) => {
+  res.json({ status: 'ok', app_version: process.env.APP_VERSION || '1.2.1' });
+});
+
 router.get('/', (_req, res) => {
   const env = getPostgresEnvDiagnostics();
   const payload = {

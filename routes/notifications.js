@@ -7,15 +7,18 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get('/', (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 300);
+
   if (req.user.role === 'admin') {
     const rows = db
       .prepare(
         `SELECT n.*, u.email AS user_email
          FROM notifications n
          LEFT JOIN users u ON u.id = n.user_id
-         ORDER BY n.created_at DESC`
+         ORDER BY n.created_at DESC
+         LIMIT ?`
       )
-      .all();
+      .all(limit);
     return res.json(rows);
   }
   const rows = db
@@ -24,9 +27,10 @@ router.get('/', (req, res) => {
        FROM notifications n
        LEFT JOIN users u ON u.id = n.user_id
        WHERE n.user_id = ?
-       ORDER BY n.created_at DESC`
+       ORDER BY n.created_at DESC
+       LIMIT ?`
     )
-    .all(req.user.id);
+    .all(req.user.id, limit);
   return res.json(rows);
 });
 

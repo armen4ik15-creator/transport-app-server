@@ -1,7 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 const os = require('os');
-const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const { authMiddleware } = require('./middleware/auth');
 const { UPLOADS_DIR, ensureDataStorage } = require('./config/paths');
@@ -34,6 +34,7 @@ const earningsRoutes = require('./routes/earnings');
 const salaryRoutes = require('./routes/salary');
 const contractorPaymentsRoutes = require('./routes/contractorPayments');
 const backupsRoutes = require('./routes/backups');
+const dashboardRoutes = require('./routes/dashboard');
 const { router: adminRegistrationsRoutes } = require('./routes/adminRegistrations');
 
 const app = express();
@@ -53,6 +54,7 @@ function getLocalIpv4Addresses() {
   return Array.from(ips);
 }
 
+app.use(compression());
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -83,6 +85,7 @@ app.use('/api/export', exportExcelRoutes);
 app.use('/api/earnings', earningsRoutes);
 app.use('/api/salary', salaryRoutes);
 app.use('/api/backups', backupsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin-registrations', adminRegistrationsRoutes);
 
 
