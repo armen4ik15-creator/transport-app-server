@@ -39,14 +39,6 @@ router.get('/', (_req, res) => {
       payload.db_error = error.message;
       payload.status = 'degraded';
     }
-    try {
-      const { getBackupStatus } = require('../services/backup/backupService');
-      const backup = getBackupStatus();
-      payload.last_backup_at = backup.latest?.createdAt ?? null;
-      payload.backup_remote_s3 = backup.remote.s3;
-    } catch {
-      // backup module optional during startup
-    }
     return res.json(payload);
   }
 

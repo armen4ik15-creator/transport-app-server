@@ -59,6 +59,10 @@ app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
+app.get('/api/health/live', (_req, res) => {
+  res.json({ status: 'ok', app_version: process.env.APP_VERSION || '1.2.1' });
+});
+
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api', authMiddleware);
