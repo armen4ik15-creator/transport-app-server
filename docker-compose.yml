@@ -1,6 +1,7 @@
 services:
   app:
     build: .
+    restart: unless-stopped
     expose:
       - "3000"
     ports:
