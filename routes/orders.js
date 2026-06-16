@@ -197,7 +197,7 @@ router.post('/bulk', requireRole('admin'), (req, res) => {
   const contractor = db.prepare('SELECT id FROM contractors WHERE id = ?').get(Number(contractor_id));
   if (!contractor) return res.status(404).json({ error: 'Контрагент не найден' });
   const createdIds = [];
-  const insertMany = db.transaction(() => {
+  db.transaction(() => {
     for (const rawDriverId of driver_ids) {
       const driverId = Number(rawDriverId);
       const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
@@ -232,7 +232,6 @@ router.post('/bulk', requireRole('admin'), (req, res) => {
       createdIds.push(result.lastInsertRowid);
     }
   });
-  insertMany();
   if (createdIds.length === 0) {
     return res.status(400).json({ error: 'Не удалось создать заказы: проверьте driver_ids' });
   }
@@ -329,6 +328,14 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     id
   );
   return res.json(db.prepare(`${ORDER_SELECT} WHERE o.id = ?`).get(id));
+});
+
+router.delete('/:id', requireRole('admin'), (req, res) => {
+  const id = Number(req.params.id);
+  const order = db.prepare('SELECT id, is_active FROM orders WHERE id = ?').get(id);
+  if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+  db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+  return res.json({ ok: true, message: 'Заказ удалён' });
 });
 
 router.post('/:id/photos', upload.single('photo'), (req, res) => {
