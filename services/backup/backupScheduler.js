@@ -1,5 +1,6 @@
 const { getBackupConfig } = require('./backupConfig');
 const { runFullBackup, isBackupRunning } = require('./backupService');
+const db = require('../../database');
 
 let timer = null;
 
