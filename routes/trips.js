@@ -311,3 +311,4 @@ router.post('/', upload.single('photo'), (req, res) => {
 });
 
 module.exports = router;
+module.exports.ensureTripSchema = ensureTripSchema;

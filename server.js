@@ -195,4 +195,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ');
   const { startBackupScheduler } = require('./services/backup/backupScheduler');
   startBackupScheduler();
+  if (typeof dbModule.startBackgroundReconnect === 'function') {
+    dbModule.startBackgroundReconnect();
+  }
 });

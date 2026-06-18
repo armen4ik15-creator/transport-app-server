@@ -92,7 +92,8 @@ function waitMs(ms) {
   deasync.loopWhile(() => Date.now() - start < ms);
 }
 
-function init() {
+function init(options = {}) {
+  const fastStartup = options.fastStartup !== false;
   const connectionString = buildConnectionString();
   if (!connectionString) {
     throw new Error('PostgreSQL: DATABASE_URL or DB_HOST/DB_USER/DB_PASSWORD required');
@@ -101,7 +102,9 @@ function init() {
   const safeHost = connectionString.replace(/:[^:@/]+@/, ':***@');
   console.log(`[data] Connecting to PostgreSQL: ${safeHost}`);
 
-  const maxAttempts = 8;
+  const maxAttempts = fastStartup
+    ? Number(process.env.DB_INIT_RETRIES || 2)
+    : Number(process.env.DB_INIT_RETRIES || 8);
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -110,7 +113,7 @@ function init() {
       ssl: resolveSslConfig(connectionString),
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 15000,
+      connectionTimeoutMillis: fastStartup ? 5000 : 15000,
     });
 
     pool.on('error', (err) => {
@@ -136,7 +139,7 @@ function init() {
         console.error('[data] PostgreSQL init failed:', error.message);
         return createFailedAdapter(error);
       }
-      const delayMs = attempt * 2000;
+      const delayMs = fastStartup ? attempt * 500 : attempt * 2000;
       console.warn(
         `[data] PostgreSQL init attempt ${attempt}/${maxAttempts} failed (${error.code || error.message}), retry in ${delayMs}ms`
       );
@@ -147,4 +150,41 @@ function init() {
   return createFailedAdapter(lastError || new Error('PostgreSQL init failed'));
 }
 
-module.exports = { init };
+async function reconnectInBackground(onConnected) {
+  const connectionString = buildConnectionString();
+  if (!connectionString) return;
+
+  const maxAttempts = Number(process.env.DB_BACKGROUND_RETRIES || 12);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const pool = new Pool({
+      connectionString,
+      ssl: resolveSslConfig(connectionString),
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    try {
+      await pool.query('SELECT 1');
+      const db = createDbFacade(pool);
+      await pool.query(SCHEMA_SQL);
+      seedAdmin(db);
+      onConnected(db);
+      return;
+    } catch (error) {
+      lastError = error;
+      pool.end().catch(() => {});
+      const delayMs = Math.min(attempt * 2000, 15000);
+      console.warn(
+        `[data] PostgreSQL background retry ${attempt}/${maxAttempts} failed (${error.code || error.message}), next in ${delayMs}ms`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  console.error('[data] PostgreSQL background reconnect gave up:', lastError?.message);
+}
+
+module.exports = { init, reconnectInBackground };
