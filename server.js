@@ -120,7 +120,6 @@ function mountRoutes() {
   console.log(`Сервер запущен на порту ${PORT}`);
   console.log(`Health: http://localhost:${PORT}/api/health`);
   console.log(`Data directory: ${require('./config/paths').DATA_DIR}`);
-  const dbModule = require('./database');
   if (dbModule.kind === 'postgres') {
     console.log('Database: PostgreSQL (persistent cloud DB)');
   } else {
