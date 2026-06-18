@@ -13,7 +13,9 @@ function createFailedAdapter(error) {
         run: fail,
       };
     },
-    transaction: fail,
+    transaction(fn) {
+      return fn();
+    },
     ping: fail,
   };
 }

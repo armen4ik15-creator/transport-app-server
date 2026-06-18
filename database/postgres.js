@@ -86,6 +86,11 @@ function seedAdmin(db) {
   seedFounderAdmin(db);
 }
 
+function waitMs(ms) {
+  const start = Date.now();
+  deasync.loopWhile(() => Date.now() - start < ms);
+}
+
 function init() {
   const connectionString = buildConnectionString();
   if (!connectionString) {
@@ -95,30 +100,50 @@ function init() {
   const safeHost = connectionString.replace(/:[^:@/]+@/, ':***@');
   console.log(`[data] Connecting to PostgreSQL: ${safeHost}`);
 
-  const pool = new Pool({
-    connectionString,
-    ssl: resolveSslConfig(connectionString),
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000,
-  });
+  const maxAttempts = 8;
+  let lastError = null;
 
-  pool.on('error', (err) => {
-    console.error('[data] PostgreSQL pool error:', err.message);
-  });
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const pool = new Pool({
+      connectionString,
+      ssl: resolveSslConfig(connectionString),
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+    });
 
-  try {
-    waitPromise(pool.query('SELECT 1'));
-    const db = createDbFacade(pool);
-    waitPromise(pool.query(SCHEMA_SQL));
-    seedAdmin(db);
-    console.log('[data] PostgreSQL connected');
-    return db;
-  } catch (error) {
-    pool.end().catch(() => {});
-    console.error('[data] PostgreSQL init failed:', error.message);
-    throw error;
+    pool.on('error', (err) => {
+      console.error('[data] PostgreSQL pool error:', err.message);
+    });
+
+    try {
+      waitPromise(pool.query('SELECT 1'));
+      const db = createDbFacade(pool);
+      waitPromise(pool.query(SCHEMA_SQL));
+      seedAdmin(db);
+      console.log('[data] PostgreSQL connected');
+      return db;
+    } catch (error) {
+      lastError = error;
+      pool.end().catch(() => {});
+      const retryable =
+        error.code === 'EAI_AGAIN' ||
+        error.code === 'ENOTFOUND' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ECONNREFUSED';
+      if (!retryable || attempt === maxAttempts) {
+        console.error('[data] PostgreSQL init failed:', error.message);
+        throw error;
+      }
+      const delayMs = attempt * 2000;
+      console.warn(
+        `[data] PostgreSQL init attempt ${attempt}/${maxAttempts} failed (${error.code || error.message}), retry in ${delayMs}ms`
+      );
+      waitMs(delayMs);
+    }
   }
+
+  throw lastError || new Error('PostgreSQL init failed');
 }
 
 module.exports = { init };

@@ -90,12 +90,17 @@ async function main() {
 
   const fileEnvs = parseEnvFile(ENV_FILE);
   const currentEnvs = await fetchCurrentEnvs();
-  const envs = { ...currentEnvs, ...fileEnvs };
+  const commitSha = process.env.DEPLOY_COMMIT_SHA || (await fetchLatestCommitSha());
+  const envs = {
+    ...currentEnvs,
+    ...fileEnvs,
+    APP_VERSION: '1.3.0',
+    GIT_COMMIT_SHA: commitSha,
+  };
   console.log(`[timeweb-deploy] Updating app ${APP_ID} (${Object.keys(envs).length} env vars, merged)...`);
   await apiRequest('PATCH', `/apps/${APP_ID}`, { envs });
 
   console.log('[timeweb-deploy] Starting deploy...');
-  const commitSha = process.env.DEPLOY_COMMIT_SHA || (await fetchLatestCommitSha());
   console.log(`[timeweb-deploy] commit_sha=${commitSha}`);
   const deploy = await apiRequest('POST', `/apps/${APP_ID}/deploy`, { commit_sha: commitSha });
   console.log('[timeweb-deploy] Deploy triggered:', JSON.stringify(deploy, null, 2));
