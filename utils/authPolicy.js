@@ -62,6 +62,7 @@ function getPublicSecurityConfig() {
     registration_requires_invite: false,
     registration_available: true,
     admin_registration_available: true,
+    driver_registration_available: true,
     password_reset_available: true,
     password_reset_requires_code: false,
   };
