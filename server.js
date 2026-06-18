@@ -38,6 +38,19 @@ app.get('/api/health/live', (_req, res) => {
   });
 });
 
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    app_version: process.env.APP_VERSION || '1.3.0',
+    git_commit: process.env.GIT_COMMIT_SHA || null,
+    booting: true,
+  });
+});
+
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', service: 'reestrpro-api' });
+});
+
 function mountRoutes() {
   require('./database');
 
