@@ -4,6 +4,7 @@ const { buildConnectionString, resolveSslConfig } = require('./connection');
 const { normalizeSqlForPostgres } = require('./sqlNormalize');
 const { SCHEMA_SQL } = require('./postgresSchema');
 const { seedDefaultAdmin, seedFounderAdmin } = require('./seedUsers');
+const { createFailedAdapter } = require('./failed');
 
 let txClient = null;
 
@@ -133,7 +134,7 @@ function init() {
         error.code === 'ECONNREFUSED';
       if (!retryable || attempt === maxAttempts) {
         console.error('[data] PostgreSQL init failed:', error.message);
-        throw error;
+        return createFailedAdapter(error);
       }
       const delayMs = attempt * 2000;
       console.warn(
@@ -143,7 +144,7 @@ function init() {
     }
   }
 
-  throw lastError || new Error('PostgreSQL init failed');
+  return createFailedAdapter(lastError || new Error('PostgreSQL init failed'));
 }
 
 module.exports = { init };

@@ -8,13 +8,7 @@ function createDatabase() {
   }
 
   if (isPostgresEnabled()) {
-    try {
-      return require('./database/postgres').init();
-    } catch (error) {
-      console.error('[data] PostgreSQL init failed:', error.message);
-      console.error('[data] Server will start; fix DB_PASSWORD and redeploy.');
-      return require('./database/failed').createFailedAdapter(error);
-    }
+    return require('./database/postgres').init();
   }
   console.log('[data] PostgreSQL not configured — using SQLite fallback');
   return require('./database/sqlite').init();

@@ -26,6 +26,10 @@ function scheduleNext() {
 }
 
 function startBackupScheduler() {
+  if (db.kind === 'postgres_error') {
+    console.log('[backup] scheduler skipped (database unavailable)');
+    return;
+  }
   const config = getBackupConfig();
   if (!config.enabled) {
     console.log('[backup] scheduler disabled');

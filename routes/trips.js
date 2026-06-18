@@ -62,6 +62,10 @@ function tryRun(sql) {
 }
 
 function ensureTripSchema() {
+  if (db.kind === 'postgres_error') {
+    console.warn('[trips] schema migration skipped (database unavailable)');
+    return;
+  }
   tryRun('ALTER TABLE trips ADD COLUMN status TEXT');
   tryRun('ALTER TABLE trips ADD COLUMN completed_at TEXT');
   db.prepare(
