@@ -188,6 +188,7 @@ async function reconnectInBackground(onConnected) {
   }
 
   console.error('[data] PostgreSQL background reconnect gave up:', lastError?.message);
+  setTimeout(() => reconnectInBackground(onConnected), 30000);
 }
 
 module.exports = { init, reconnectInBackground };

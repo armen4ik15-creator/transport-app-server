@@ -1,6 +1,11 @@
 function createFailedAdapter(error) {
   const fail = () => {
-    throw error;
+    const err = new Error(
+      'Сервер подключается к базе данных. Подождите 30 секунд и попробуйте снова.'
+    );
+    err.status = 503;
+    err.internalCause = error;
+    throw err;
   };
 
   return {

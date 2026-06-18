@@ -32,6 +32,16 @@ function setDb(nextDb) {
   dbState.current = nextDb;
 }
 
+function connectPostgresWithRetries() {
+  if (!isPostgresEnabled()) return getDb();
+  if (getDb().kind === 'postgres') return getDb();
+
+  console.log('[data] Connecting to PostgreSQL (post-boot sync)...');
+  const nextDb = require('./database/postgres').init({ fastStartup: false });
+  setDb(nextDb);
+  return nextDb;
+}
+
 function startBackgroundReconnect() {
   if (reconnectStarted) return;
   if (!isPostgresEnabled()) return;
@@ -68,6 +78,7 @@ const dbProxy = new Proxy(
       if (prop === 'getDb') return getDb;
       if (prop === 'setDb') return setDb;
       if (prop === 'startBackgroundReconnect') return startBackgroundReconnect;
+      if (prop === 'connectPostgresWithRetries') return connectPostgresWithRetries;
 
       const db = getDb();
       const value = db[prop];

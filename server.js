@@ -38,22 +38,17 @@ app.get('/api/health/live', (_req, res) => {
   });
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    app_version: process.env.APP_VERSION || '1.3.0',
-    git_commit: process.env.GIT_COMMIT_SHA || null,
-    booting: true,
-  });
-});
-
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'reestrpro-api' });
 });
 
 function mountRoutes() {
-  require('./database');
+  const dbModule = require('./database');
+  if (typeof dbModule.connectPostgresWithRetries === 'function') {
+    dbModule.connectPostgresWithRetries();
+  }
 
+  const { requireDatabase } = require('./middleware/dbReady');
   const { authMiddleware } = require('./middleware/auth');
   const healthRoutes = require('./routes/health');
   const authRoutes = require('./routes/auth');
@@ -85,8 +80,8 @@ function mountRoutes() {
   const { router: driverRegistrationsRoutes } = require('./routes/driverRegistrations');
 
   app.use('/api/health', healthRoutes);
-  app.use('/api/auth', authRoutes);
-  app.use('/api', authMiddleware);
+  app.use('/api/auth', requireDatabase, authRoutes);
+  app.use('/api', authMiddleware, requireDatabase);
   app.use('/api/drivers', driversRoutes);
   app.use('/api/contractors', contractorPaymentsRoutes);
   app.use('/api/contractors', contractorsRoutes);
