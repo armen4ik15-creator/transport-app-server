@@ -4,14 +4,14 @@ const { signToken } = require('../utils/jwt');
 const { authMiddleware } = require('../middleware/auth');
 const { hashPasswordSync, comparePasswordSync } = require('../utils/password');
 const {
-  canSelfRegister,
   getPublicSecurityConfig,
   validatePasswordStrength,
-  validateRegistrationInvite,
   validatePasswordResetForUser,
   validatePasswordResetCode,
 } = require('../utils/authPolicy');
 const { notifyOwnerAdmins } = require('./adminRegistrations');
+const { notifyAllAdmins: notifyDriverRegistrationAdmins } = require('./driverRegistrations');
+const { normalizeEmail, isValidEmail } = require('../utils/email');
 
 const router = express.Router();
 
@@ -51,7 +51,10 @@ router.post('/register', (req, res) => {
   if (passwordError) return res.status(400).json({ error: passwordError });
 
   const role = normalizeRole(roleInput);
-  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({ error: 'Укажите корректный email (например driver@mail.ru)' });
+  }
 
   if (isAdminRegistrationRole(role)) {
     if (!full_name || !String(full_name).trim()) {
@@ -96,59 +99,53 @@ router.post('/register', (req, res) => {
     });
   }
 
-  if (!canSelfRegister()) {
-    return res.status(403).json({
-      error: 'Регистрация закрыта. Попросите администратора создать аккаунт.',
-    });
+  if (!full_name || !String(full_name).trim()) {
+    return res.status(400).json({ error: 'full_name обязателен для водителя' });
   }
-
-  if (!validateRegistrationInvite(invite_code)) {
-    return res.status(403).json({
-      error: 'Неверный код приглашения или регистрация отключена.',
-    });
+  if (!confirm_password) {
+    return res.status(400).json({ error: 'confirm_password обязателен' });
   }
-
-  if (confirm_password != null && String(password) !== String(confirm_password)) {
+  if (String(password) !== String(confirm_password)) {
     return res.status(400).json({ error: 'Пароли не совпадают' });
   }
 
   const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
   if (exists) return res.status(409).json({ error: 'Email уже зарегистрирован' });
 
-  const hash = hashPasswordSync(password);
-  const registerUser = db.transaction(() => {
-    const u = db
-      .prepare(
-        `INSERT INTO users
-         (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
-         VALUES (?, ?, ?, ?, ?, 1, 0)`
-      )
-      .run(normalizedEmail, hash, 'driver', full_name || normalizedEmail, phone || null);
+  const pendingDriver = db
+    .prepare(
+      `SELECT id FROM driver_registration_requests
+       WHERE email = ? AND status = 'pending'`
+    )
+    .get(normalizedEmail);
+  if (pendingDriver) {
+    return res.status(409).json({ error: 'Заявка на этот email уже ожидает одобрения' });
+  }
 
-    db.prepare(
-      `INSERT INTO drivers
-       (user_id, license_number, license_expiry, medical_check_expiry, is_active)
-       VALUES (?, ?, ?, ?, 1)`
-    ).run(
-      u.lastInsertRowid,
+  const hash = hashPasswordSync(password);
+  const result = db
+    .prepare(
+      `INSERT INTO driver_registration_requests
+       (email, password_hash, full_name, phone, license_number, license_expiry, medical_check_expiry, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
+    )
+    .run(
+      normalizedEmail,
+      hash,
+      String(full_name).trim(),
+      phone || null,
       license_number || null,
       license_expiry || null,
       medical_check_expiry || null
     );
-    return u.lastInsertRowid;
-  });
-  const userId = registerUser();
 
-  const token = signToken({ id: userId, role: 'driver', email: normalizedEmail });
+  const requestId = result.lastInsertRowid;
+  const message = `Новая заявка водителя: ${String(full_name).trim()} (${normalizedEmail})`;
+  notifyDriverRegistrationAdmins(message, requestId);
+
   return res.status(201).json({
-    token,
-    user: {
-      id: userId,
-      email: normalizedEmail,
-      role: 'driver',
-      full_name: full_name || normalizedEmail,
-      phone: phone || null,
-    },
+    pending: true,
+    message: 'Ожидайте одобрения администратора',
   });
 });
 
@@ -161,7 +158,11 @@ router.post('/forgot-password', (req, res) => {
   const passwordError = validatePasswordStrength(new_password);
   if (passwordError) return res.status(400).json({ error: passwordError });
 
-  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({ error: 'Укажите корректный email' });
+  }
+
   const user = db
     .prepare('SELECT id, password_reset_enabled FROM users WHERE email = ?')
     .get(normalizedEmail);
@@ -261,13 +262,25 @@ router.post('/login', (req, res) => {
   }
   const normalizedEmail = String(email).trim().toLowerCase();
 
-  const pending = db
+  const pendingAdmin = db
     .prepare(
       `SELECT id FROM admin_registration_requests
        WHERE email = ? AND status = 'pending'`
     )
     .get(normalizedEmail);
-  if (pending) {
+  if (pendingAdmin) {
+    return res.status(403).json({
+      error: 'Заявка на регистрацию ожидает одобрения администратора',
+    });
+  }
+
+  const pendingDriver = db
+    .prepare(
+      `SELECT id FROM driver_registration_requests
+       WHERE email = ? AND status = 'pending'`
+    )
+    .get(normalizedEmail);
+  if (pendingDriver) {
     return res.status(403).json({
       error: 'Заявка на регистрацию ожидает одобрения администратора',
     });

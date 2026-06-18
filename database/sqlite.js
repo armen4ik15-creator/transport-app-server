@@ -232,6 +232,23 @@ function migrate(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS driver_registration_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      phone TEXT,
+      license_number TEXT,
+      license_expiry TEXT,
+      medical_check_expiry TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected')),
+      reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TEXT,
+      rejection_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS activity_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -262,6 +279,9 @@ function migrate(db) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_reg_pending_email
       ON admin_registration_requests(email) WHERE status = 'pending';
     CREATE INDEX IF NOT EXISTS idx_admin_reg_status ON admin_registration_requests(status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_reg_pending_email
+      ON driver_registration_requests(email) WHERE status = 'pending';
+    CREATE INDEX IF NOT EXISTS idx_driver_reg_status ON driver_registration_requests(status);
     CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
 
     CREATE TABLE IF NOT EXISTS fuel_cards (

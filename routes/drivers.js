@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { hashPasswordSync } = require('../utils/password');
+const { normalizeEmail, isValidEmail } = require('../utils/email');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -43,18 +44,22 @@ router.post('/', requireRole('admin'), (req, res) => {
       .status(400)
       .json({ error: 'email, password и full_name обязательны' });
   }
-  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({ error: 'Укажите корректный email (например driver@mail.ru)' });
+  }
+  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
   if (exists) return res.status(409).json({ error: 'Email уже зарегистрирован' });
 
   const hash = hashPasswordSync(password);
-  const createDriver = db.transaction(() => {
+  const driverId = db.transaction(() => {
     const u = db
       .prepare(
         `INSERT INTO users
          (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
          VALUES (?, ?, 'driver', ?, ?, 1, 0)`
       )
-      .run(email, hash, full_name, phone || null);
+      .run(normalizedEmail, hash, full_name, phone || null);
     const d = db
       .prepare(
         `INSERT INTO drivers
@@ -71,7 +76,6 @@ router.post('/', requireRole('admin'), (req, res) => {
       );
     return d.lastInsertRowid;
   });
-  const driverId = createDriver();
   const created = db
     .prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`)
     .get(driverId);

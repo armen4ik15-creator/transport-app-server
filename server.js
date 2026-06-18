@@ -37,6 +37,7 @@ const contractorPaymentsRoutes = require('./routes/contractorPayments');
 const backupsRoutes = require('./routes/backups');
 const dashboardRoutes = require('./routes/dashboard');
 const { router: adminRegistrationsRoutes } = require('./routes/adminRegistrations');
+const { router: driverRegistrationsRoutes } = require('./routes/driverRegistrations');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -92,6 +93,7 @@ app.use('/api/salary', salaryRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin-registrations', adminRegistrationsRoutes);
+app.use('/api/driver-registrations', driverRegistrationsRoutes);
 
 
 app.use((err, _req, res, _next) => {

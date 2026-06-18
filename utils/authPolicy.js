@@ -57,16 +57,13 @@ function validatePasswordResetCode(provided) {
 }
 
 function getPublicSecurityConfig() {
-  const open = isRegistrationOpen();
-  const invite = getInviteCode();
-  const resetCodeConfigured = Boolean(getPasswordResetCode());
   return {
-    registration_open: open,
-    registration_requires_invite: !open && Boolean(invite),
-    registration_available: canSelfRegister(),
+    registration_open: false,
+    registration_requires_invite: false,
+    registration_available: true,
     admin_registration_available: true,
     password_reset_available: true,
-    password_reset_requires_code: resetCodeConfigured,
+    password_reset_requires_code: false,
   };
 }
 

@@ -9,42 +9,33 @@ router.use(requireRole('admin'));
 
 const REQUEST_SELECT = `
   SELECT
-    r.id, r.email, r.full_name, r.phone, r.status,
-    r.reviewed_by, r.reviewed_at, r.rejection_reason, r.created_at,
+    r.id, r.email, r.full_name, r.phone,
+    r.license_number, r.license_expiry, r.medical_check_expiry,
+    r.status, r.reviewed_by, r.reviewed_at, r.rejection_reason, r.created_at,
     reviewer.email AS reviewed_by_email,
     reviewer.full_name AS reviewed_by_name
-  FROM admin_registration_requests r
+  FROM driver_registration_requests r
   LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by
+`;
+
+const DRIVER_WITH_USER = `
+  SELECT
+    d.id, d.user_id, d.license_number, d.license_expiry, d.medical_check_expiry,
+    d.is_active, d.car_number, d.created_at,
+    u.email, u.full_name, u.phone
+  FROM drivers d
+  JOIN users u ON u.id = d.user_id
 `;
 
 function getRequestById(id) {
   return db.prepare(`${REQUEST_SELECT} WHERE r.id = ?`).get(id);
 }
 
-function isOwnerAdmin(userId) {
-  const row = db.prepare('SELECT is_owner FROM users WHERE id = ?').get(userId);
-  return Boolean(row && Number(row.is_owner) === 1);
-}
-
-function requireOwnerAdmin(req, res, next) {
-  if (!isOwnerAdmin(req.user.id)) {
-    return res.status(403).json({
-      error: 'Только главный администратор может одобрять или отклонять заявки учредителей',
-    });
-  }
-  return next();
-}
-
-function notifyOwnerAdmins(message, refId) {
-  let targets = db
-    .prepare(`SELECT id FROM users WHERE role = 'admin' AND is_owner = 1`)
-    .all();
-  if (targets.length === 0) {
-    targets = db.prepare(`SELECT id FROM users WHERE role = 'admin'`).all();
-  }
+function notifyAllAdmins(message, refId) {
+  const targets = db.prepare(`SELECT id FROM users WHERE role = 'admin'`).all();
   const insert = db.prepare(
     `INSERT INTO notifications (user_id, message, read, kind, ref_id)
-     VALUES (?, ?, 0, 'admin_registration', ?)`
+     VALUES (?, ?, 0, 'driver_registration', ?)`
   );
   targets.forEach((admin) => {
     insert.run(admin.id, message, refId);
@@ -71,10 +62,10 @@ router.get('/:id', (req, res) => {
   return res.json(row);
 });
 
-router.post('/:id/approve', requireOwnerAdmin, (req, res) => {
+router.post('/:id/approve', (req, res) => {
   const id = Number(req.params.id);
   const request = db
-    .prepare(`SELECT * FROM admin_registration_requests WHERE id = ?`)
+    .prepare(`SELECT * FROM driver_registration_requests WHERE id = ?`)
     .get(id);
   if (!request) return res.status(404).json({ error: 'Заявка не найдена' });
   if (request.status !== 'pending') {
@@ -86,12 +77,12 @@ router.post('/:id/approve', requireOwnerAdmin, (req, res) => {
     return res.status(409).json({ error: 'Email уже зарегистрирован' });
   }
 
-  const userId = db.transaction(() => {
+  const driverId = db.transaction(() => {
     const userInsert = db
       .prepare(
         `INSERT INTO users
          (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
-         VALUES (?, ?, 'admin', ?, ?, 1, 0)`
+         VALUES (?, ?, 'driver', ?, ?, 1, 0)`
       )
       .run(
         request.email,
@@ -100,8 +91,21 @@ router.post('/:id/approve', requireOwnerAdmin, (req, res) => {
         request.phone || null
       );
 
+    const driverInsert = db
+      .prepare(
+        `INSERT INTO drivers
+         (user_id, license_number, license_expiry, medical_check_expiry, is_active)
+         VALUES (?, ?, ?, ?, 1)`
+      )
+      .run(
+        userInsert.lastInsertRowid,
+        request.license_number || null,
+        request.license_expiry || null,
+        request.medical_check_expiry || null
+      );
+
     db.prepare(
-      `UPDATE admin_registration_requests
+      `UPDATE driver_registration_requests
        SET status = 'approved',
            reviewed_by = ?,
            reviewed_at = datetime('now'),
@@ -111,30 +115,33 @@ router.post('/:id/approve', requireOwnerAdmin, (req, res) => {
 
     db.prepare(
       `UPDATE notifications SET read = 1
-       WHERE kind = 'admin_registration' AND ref_id = ?`
+       WHERE kind = 'driver_registration' AND ref_id = ?`
     ).run(id);
 
-    return userInsert.lastInsertRowid;
+    return driverInsert.lastInsertRowid;
   });
-  logActivity(req.user.id, 'admin_registration.approve', {
+
+  logActivity(req.user.id, 'driver_registration.approve', {
     request_id: id,
-    user_id: userId,
+    driver_id: driverId,
     email: request.email,
   });
 
+  const driver = db.prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`).get(driverId);
+
   return res.json({
     ok: true,
-    message: `Учредитель ${request.full_name} одобрен. Может войти как администратор.`,
+    message: `Водитель ${request.full_name} одобрен. Может войти в приложение.`,
     request: getRequestById(id),
-    user_id: userId,
+    driver,
   });
 });
 
-router.post('/:id/reject', requireOwnerAdmin, (req, res) => {
+router.post('/:id/reject', (req, res) => {
   const id = Number(req.params.id);
   const { reason } = req.body || {};
   const request = db
-    .prepare(`SELECT * FROM admin_registration_requests WHERE id = ?`)
+    .prepare(`SELECT * FROM driver_registration_requests WHERE id = ?`)
     .get(id);
   if (!request) return res.status(404).json({ error: 'Заявка не найдена' });
   if (request.status !== 'pending') {
@@ -142,7 +149,7 @@ router.post('/:id/reject', requireOwnerAdmin, (req, res) => {
   }
 
   db.prepare(
-    `UPDATE admin_registration_requests
+    `UPDATE driver_registration_requests
      SET status = 'rejected',
          reviewed_by = ?,
          reviewed_at = datetime('now'),
@@ -152,10 +159,10 @@ router.post('/:id/reject', requireOwnerAdmin, (req, res) => {
 
   db.prepare(
     `UPDATE notifications SET read = 1
-     WHERE kind = 'admin_registration' AND ref_id = ?`
+     WHERE kind = 'driver_registration' AND ref_id = ?`
   ).run(id);
 
-  logActivity(req.user.id, 'admin_registration.reject', {
+  logActivity(req.user.id, 'driver_registration.reject', {
     request_id: id,
     email: request.email,
     reason: reason || null,
@@ -168,4 +175,4 @@ router.post('/:id/reject', requireOwnerAdmin, (req, res) => {
   });
 });
 
-module.exports = { router, notifyOwnerAdmins };
+module.exports = { router, notifyAllAdmins };
