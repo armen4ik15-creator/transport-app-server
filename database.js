@@ -1,6 +1,7 @@
 const { isPostgresEnabled, getPostgresEnvDiagnostics } = require('./database/connection');
 
 const dbState = { current: null };
+let reconnectStarted = false;
 
 function createDatabase() {
   const env = getPostgresEnvDiagnostics();
@@ -32,9 +33,11 @@ function setDb(nextDb) {
 }
 
 function startBackgroundReconnect() {
+  if (reconnectStarted) return;
   if (!isPostgresEnabled()) return;
   const db = getDb();
   if (db.kind === 'postgres') return;
+  reconnectStarted = true;
 
   require('./database/postgres').reconnectInBackground((nextDb) => {
     setDb(nextDb);
@@ -46,6 +49,14 @@ function startBackgroundReconnect() {
       }
     } catch (error) {
       console.warn('[data] post-reconnect schema migration skipped:', error.message);
+    }
+    try {
+      const { restartBackupScheduler } = require('./services/backup/backupScheduler');
+      if (typeof restartBackupScheduler === 'function') {
+        restartBackupScheduler();
+      }
+    } catch (error) {
+      console.warn('[data] backup scheduler restart skipped:', error.message);
     }
   });
 }
@@ -69,3 +80,7 @@ const dbProxy = new Proxy(
 );
 
 module.exports = dbProxy;
+
+if (dbState.current?.kind === 'postgres_error' && isPostgresEnabled()) {
+  setImmediate(() => startBackgroundReconnect());
+}

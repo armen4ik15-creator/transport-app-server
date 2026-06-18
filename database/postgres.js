@@ -102,9 +102,12 @@ function init(options = {}) {
   const safeHost = connectionString.replace(/:[^:@/]+@/, ':***@');
   console.log(`[data] Connecting to PostgreSQL: ${safeHost}`);
 
-  const maxAttempts = fastStartup
-    ? Number(process.env.DB_INIT_RETRIES || 2)
-    : Number(process.env.DB_INIT_RETRIES || 8);
+  if (fastStartup) {
+    console.log('[data] PostgreSQL sync init skipped — connecting in background');
+    return createFailedAdapter(new Error('PostgreSQL connecting in background'));
+  }
+
+  const maxAttempts = Number(process.env.DB_INIT_RETRIES || 8);
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -113,7 +116,7 @@ function init(options = {}) {
       ssl: resolveSslConfig(connectionString),
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: fastStartup ? 5000 : 15000,
+      connectionTimeoutMillis: 15000,
     });
 
     pool.on('error', (err) => {
@@ -139,7 +142,7 @@ function init(options = {}) {
         console.error('[data] PostgreSQL init failed:', error.message);
         return createFailedAdapter(error);
       }
-      const delayMs = fastStartup ? attempt * 500 : attempt * 2000;
+      const delayMs = attempt * 2000;
       console.warn(
         `[data] PostgreSQL init attempt ${attempt}/${maxAttempts} failed (${error.code || error.message}), retry in ${delayMs}ms`
       );
