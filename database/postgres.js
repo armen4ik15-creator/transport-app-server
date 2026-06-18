@@ -87,6 +87,31 @@ function seedAdmin(db) {
   seedFounderAdmin(db);
 }
 
+function setupPostgresPool(pool) {
+  return (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT pg_advisory_lock(991001)');
+      await client.query(SCHEMA_SQL);
+      const db = createDbFacade(pool);
+      seedAdmin(db);
+      return db;
+    } finally {
+      await client.query('SELECT pg_advisory_unlock(991001)').catch(() => {});
+      client.release();
+    }
+  })();
+}
+
+function isRetryablePostgresError(error) {
+  return (
+    error.code === 'EAI_AGAIN' ||
+    error.code === 'ENOTFOUND' ||
+    error.code === 'ETIMEDOUT' ||
+    error.code === 'ECONNREFUSED' ||
+    error.code === '40P01'
+  );
+}
 function waitMs(ms) {
   const start = Date.now();
   deasync.loopWhile(() => Date.now() - start < ms);
@@ -125,19 +150,13 @@ function init(options = {}) {
 
     try {
       waitPromise(pool.query('SELECT 1'));
-      const db = createDbFacade(pool);
-      waitPromise(pool.query(SCHEMA_SQL));
-      seedAdmin(db);
+      const db = waitPromise(setupPostgresPool(pool));
       console.log('[data] PostgreSQL connected');
       return db;
     } catch (error) {
       lastError = error;
       pool.end().catch(() => {});
-      const retryable =
-        error.code === 'EAI_AGAIN' ||
-        error.code === 'ENOTFOUND' ||
-        error.code === 'ETIMEDOUT' ||
-        error.code === 'ECONNREFUSED';
+      const retryable = isRetryablePostgresError(error);
       if (!retryable || attempt === maxAttempts) {
         console.error('[data] PostgreSQL init failed:', error.message);
         return createFailedAdapter(error);
@@ -171,14 +190,17 @@ async function reconnectInBackground(onConnected) {
 
     try {
       await pool.query('SELECT 1');
-      const db = createDbFacade(pool);
-      await pool.query(SCHEMA_SQL);
-      seedAdmin(db);
+      const db = await setupPostgresPool(pool);
       onConnected(db);
       return;
     } catch (error) {
       lastError = error;
       pool.end().catch(() => {});
+      if (!isRetryablePostgresError(error) && attempt === maxAttempts) {
+        console.error('[data] PostgreSQL background reconnect failed:', error.message);
+        setTimeout(() => reconnectInBackground(onConnected), 30000);
+        return;
+      }
       const delayMs = Math.min(attempt * 2000, 15000);
       console.warn(
         `[data] PostgreSQL background retry ${attempt}/${maxAttempts} failed (${error.code || error.message}), next in ${delayMs}ms`

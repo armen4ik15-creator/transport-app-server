@@ -91,7 +91,3 @@ const dbProxy = new Proxy(
 );
 
 module.exports = dbProxy;
-
-if (dbState.current?.kind === 'postgres_error' && isPostgresEnabled()) {
-  setImmediate(() => startBackgroundReconnect());
-}
