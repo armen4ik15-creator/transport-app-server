@@ -44,9 +44,6 @@ app.get('/', (_req, res) => {
 
 function mountRoutes() {
   const dbModule = require('./database');
-  if (typeof dbModule.connectPostgresWithRetries === 'function') {
-    dbModule.connectPostgresWithRetries();
-  }
 
   const { requireDatabase } = require('./middleware/dbReady');
   const { authMiddleware } = require('./middleware/auth');

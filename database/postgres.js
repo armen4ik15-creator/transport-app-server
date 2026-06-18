@@ -157,7 +157,7 @@ async function reconnectInBackground(onConnected) {
   const connectionString = buildConnectionString();
   if (!connectionString) return;
 
-  const maxAttempts = Number(process.env.DB_BACKGROUND_RETRIES || 12);
+  const maxAttempts = Number(process.env.DB_BACKGROUND_RETRIES || 60);
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
