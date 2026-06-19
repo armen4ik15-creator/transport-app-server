@@ -1,11 +1,15 @@
 services:
   app:
     build: .
+    network_mode: bridge
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     restart: unless-stopped
     expose:
       - "3000"
     ports:
-      - "50000:3000"
+      - "50200:3000"
     environment:
       PORT: "3000"
       NODE_ENV: production
