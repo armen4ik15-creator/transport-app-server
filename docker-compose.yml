@@ -3,6 +3,9 @@ services:
     build: .
     # Timeweb: avoid compose user-defined network (subnet pool exhaustion)
     network_mode: bridge
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     restart: unless-stopped
     expose:
       - "3000"
