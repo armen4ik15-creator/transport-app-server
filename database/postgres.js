@@ -157,13 +157,15 @@ function isRetryablePostgresError(error) {
 
 async function queryWithTimeout(pool, sql, timeoutMs = 12000) {
   let timer;
+  const queryPromise = pool.query(sql);
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => {
+      pool.end().catch(() => {});
       reject(Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' }));
     }, timeoutMs);
   });
   try {
-    return await Promise.race([pool.query(sql), timeoutPromise]);
+    return await Promise.race([queryPromise, timeoutPromise]);
   } finally {
     clearTimeout(timer);
   }
