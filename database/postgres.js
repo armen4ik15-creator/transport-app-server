@@ -3,7 +3,7 @@ const { Pool } = require('pg');
 const { buildConnectionString, resolveSslConfig } = require('./connection');
 const { normalizeSqlForPostgres } = require('./sqlNormalize');
 const { SCHEMA_SQL } = require('./postgresSchema');
-const { seedDefaultAdmin, seedFounderAdmin } = require('./seedUsers');
+const { seedAdminAsync } = require('./seedUsers');
 const { createFailedAdapter } = require('./failed');
 
 let txClient = null;
@@ -82,9 +82,16 @@ function createDbFacade(pool) {
   };
 }
 
-function seedAdmin(db) {
-  seedDefaultAdmin(db);
-  seedFounderAdmin(db);
+function createPoolConfig(connectionString) {
+  return {
+    connectionString,
+    ssl: resolveSslConfig(connectionString),
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
+  };
 }
 
 function setupPostgresPool(pool) {
@@ -93,9 +100,8 @@ function setupPostgresPool(pool) {
     try {
       await client.query('SELECT pg_advisory_lock(991001)');
       await client.query(SCHEMA_SQL);
-      const db = createDbFacade(pool);
-      seedAdmin(db);
-      return db;
+      await seedAdminAsync(client);
+      return createDbFacade(pool);
     } finally {
       await client.query('SELECT pg_advisory_unlock(991001)').catch(() => {});
       client.release();
@@ -109,7 +115,8 @@ function isRetryablePostgresError(error) {
     error.code === 'ENOTFOUND' ||
     error.code === 'ETIMEDOUT' ||
     error.code === 'ECONNREFUSED' ||
-    error.code === '40P01'
+    error.code === '40P01' ||
+    error.code === '57P05'
   );
 }
 function waitMs(ms) {
@@ -136,13 +143,7 @@ function init(options = {}) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const pool = new Pool({
-      connectionString,
-      ssl: resolveSslConfig(connectionString),
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 15000,
-    });
+    const pool = new Pool(createPoolConfig(connectionString));
 
     pool.on('error', (err) => {
       console.error('[data] PostgreSQL pool error:', err.message);
@@ -181,10 +182,7 @@ async function reconnectInBackground(onConnected) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const pool = new Pool({
-      connectionString,
-      ssl: resolveSslConfig(connectionString),
-      max: 10,
-      idleTimeoutMillis: 30000,
+      ...createPoolConfig(connectionString),
       connectionTimeoutMillis: 10000,
     });
 

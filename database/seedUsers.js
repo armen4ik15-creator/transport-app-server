@@ -99,4 +99,100 @@ function seedProductionOwner(db) {
   seedFounderAdmin(db);
 }
 
-module.exports = { seedDefaultAdmin, seedFounderAdmin, seedProductionOwner };
+async function ensureUserAsync(client, { email, password, role, fullName, passwordResetEnabled = 0, isOwner = 0 }) {
+  const exists = await client.query('SELECT id FROM users WHERE email = $1', [email]);
+  if (exists.rows[0]) return false;
+  const hash = hashPasswordSync(password);
+  await client.query(
+    `INSERT INTO users
+     (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
+     VALUES ($1, $2, $3, $4, NULL, $5, $6)`,
+    [email, hash, role, fullName, passwordResetEnabled, isOwner]
+  );
+  return true;
+}
+
+async function migrateLegacyFounderEmailAsync(client, targetEmail) {
+  const legacy = LEGACY_FOUNDER_EMAIL.trim().toLowerCase();
+  if (legacy === targetEmail) return;
+
+  const legacyResult = await client.query('SELECT id FROM users WHERE email = $1', [legacy]);
+  const legacyUser = legacyResult.rows[0];
+  if (!legacyUser) return;
+
+  const targetResult = await client.query('SELECT id FROM users WHERE email = $1', [targetEmail]);
+  if (targetResult.rows[0]) {
+    await client.query('UPDATE users SET is_owner = 0 WHERE id = $1', [legacyUser.id]);
+    console.log(`[seed] legacy founder ${legacy} demoted (target ${targetEmail} already exists)`);
+    return;
+  }
+
+  await client.query('UPDATE users SET email = $1 WHERE id = $2', [targetEmail, legacyUser.id]);
+  console.log(`[seed] migrated founder email ${legacy} -> ${targetEmail}`);
+}
+
+async function seedDefaultAdminAsync(client) {
+  if (await ensureUserAsync(client, { ...DEFAULT_ADMIN, role: 'admin' })) {
+    console.log(`[seed] ${DEFAULT_ADMIN.email} / ${DEFAULT_ADMIN.password} создан`);
+  }
+}
+
+async function seedFounderAdminAsync(client) {
+  const founder = getFounderCredentials();
+  await migrateLegacyFounderEmailAsync(client, founder.email);
+
+  const hasExplicitPassword = Boolean(
+    process.env.FOUNDER_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD
+  );
+  const existingResult = await client.query(
+    'SELECT id, password_hash FROM users WHERE email = $1',
+    [founder.email]
+  );
+  const existing = existingResult.rows[0];
+
+  if (existing) {
+    if (hasExplicitPassword) {
+      const hash = hashPasswordSync(String(founder.password));
+      await client.query(
+        `UPDATE users
+         SET password_hash = $1, role = 'admin', full_name = $2, password_reset_enabled = 1, is_owner = 1
+         WHERE id = $3`,
+        [hash, founder.fullName, existing.id]
+      );
+      console.log(`[seed] founder admin ${founder.email} updated (password + is_owner=1)`);
+    } else {
+      await client.query(
+        `UPDATE users
+         SET role = 'admin', full_name = $1, password_reset_enabled = 1, is_owner = 1
+         WHERE id = $2`,
+        [founder.fullName, existing.id]
+      );
+      console.log(`[seed] founder admin ${founder.email} updated (is_owner=1, password kept)`);
+    }
+  } else {
+    const hash = hashPasswordSync(String(founder.password));
+    await client.query(
+      `INSERT INTO users
+       (email, password_hash, role, full_name, phone, password_reset_enabled, is_owner)
+       VALUES ($1, $2, 'admin', $3, NULL, 1, 1)`,
+      [founder.email, hash, founder.fullName]
+    );
+    console.log(`[seed] founder admin ${founder.email} created (is_owner=1)`);
+  }
+
+  await client.query('UPDATE users SET is_owner = 0 WHERE email != $1 AND is_owner = 1', [
+    founder.email,
+  ]);
+}
+
+async function seedAdminAsync(client) {
+  await seedDefaultAdminAsync(client);
+  await seedFounderAdminAsync(client);
+}
+
+module.exports = {
+  seedDefaultAdmin,
+  seedFounderAdmin,
+  seedProductionOwner,
+  seedAdminAsync,
+};
