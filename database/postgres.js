@@ -86,15 +86,15 @@ function attachPoolHandlers(pool) {
   pool.on('error', (err) => {
     console.error('[data] PostgreSQL pool error:', err.message);
   });
-  pool.on('connect', (client) => {
-    client.query("SET idle_session_timeout TO '0'").catch(() => {});
-    client.query("SET idle_in_transaction_session_timeout TO '0'").catch(() => {});
-  });
 }
 
 function createPoolConfig(connectionString) {
+  const sessionOptions = '-c idle_session_timeout=0 -c idle_in_transaction_session_timeout=0';
+  const separator = connectionString.includes('?') ? '&' : '?';
+  const connectionWithSession = `${connectionString}${separator}options=${encodeURIComponent(sessionOptions)}`;
+
   return {
-    connectionString,
+    connectionString: connectionWithSession,
     ssl: resolveSslConfig(connectionString),
     max: 10,
     idleTimeoutMillis: 30000,
@@ -104,16 +104,10 @@ function createPoolConfig(connectionString) {
   };
 }
 
-async function configureSession(client) {
-  await client.query("SET idle_session_timeout TO '0'");
-  await client.query("SET idle_in_transaction_session_timeout TO '0'");
-}
-
 function setupPostgresPool(pool) {
   return (async () => {
     const client = await pool.connect();
     try {
-      await configureSession(client);
       await client.query('SELECT pg_advisory_lock(991001)');
       await client.query(SCHEMA_SQL);
       await seedAdminAsync(client);
