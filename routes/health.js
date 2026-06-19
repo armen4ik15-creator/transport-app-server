@@ -26,7 +26,8 @@ router.get('/', (_req, res) => {
   };
 
   if (db.kind === 'postgres_error') {
-    payload.status = 'degraded';
+    payload.status = 'ok';
+    payload.db_status = 'degraded';
     payload.db_connected = false;
     const cause = db.initError?.internalCause || db.initError;
     payload.db_error = cause?.message || db.initError?.message || 'PostgreSQL connection failed';
