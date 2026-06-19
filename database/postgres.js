@@ -198,6 +198,9 @@ async function reconnectInBackground(onConnected, onError) {
     attachPoolHandlers(pool);
 
     try {
+      console.warn(
+        `[data] PostgreSQL background retry ${attempt}/${maxAttempts} starting`
+      );
       await pool.query('SELECT 1');
       const db = await setupPostgresPool(pool);
       onConnected(db);

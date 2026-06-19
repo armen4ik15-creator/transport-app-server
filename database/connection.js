@@ -12,7 +12,8 @@ function buildConnectionString() {
   }
   const encodedUser = encodeURIComponent(user);
   const encodedPassword = encodeURIComponent(password);
-  return `postgresql://${encodedUser}:${encodedPassword}@${host}:${port}/${database}`;
+  const timeoutSec = Number(process.env.DB_CONNECT_TIMEOUT_SEC || 10);
+  return `postgresql://${encodedUser}:${encodedPassword}@${host}:${port}/${database}?connect_timeout=${timeoutSec}`;
 }
 
 function resolveSslConfig(connectionString) {
