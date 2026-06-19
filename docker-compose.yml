@@ -6,8 +6,6 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
-    ports:
-      - "10200:3000"
     environment:
       PORT: "3000"
       NODE_ENV: production
