@@ -8,7 +8,7 @@ services:
     expose:
       - "3000"
     ports:
-      - "51600:3000"
+      - "51800:3000"
     environment:
       PORT: "3000"
       NODE_ENV: production
