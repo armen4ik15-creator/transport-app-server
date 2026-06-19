@@ -49,8 +49,10 @@ function startBackgroundReconnect() {
   const db = getDb();
   if (db.kind === 'postgres') return;
   reconnectStarted = true;
+  console.log('[data] PostgreSQL background reconnect started');
 
-  require('./database/postgres').reconnectInBackground(
+  require('./database/postgres')
+    .reconnectInBackground(
     (nextDb) => {
       setDb(nextDb);
       dbState.lastReconnectError = null;
@@ -79,7 +81,11 @@ function startBackgroundReconnect() {
         db.initError = error;
       }
     }
-  );
+  )
+    .catch((error) => {
+      console.error('[data] PostgreSQL background reconnect crashed:', error.message);
+      reconnectStarted = false;
+    });
 }
 
 const dbProxy = new Proxy(

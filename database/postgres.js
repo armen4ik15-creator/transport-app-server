@@ -186,6 +186,7 @@ async function reconnectInBackground(onConnected, onError) {
   const connectionString = buildConnectionString();
   if (!connectionString) return;
 
+  console.log('[data] PostgreSQL background reconnect loop running');
   const maxAttempts = Number(process.env.DB_BACKGROUND_RETRIES || 60);
   let lastError = null;
 
