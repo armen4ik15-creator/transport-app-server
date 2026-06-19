@@ -106,6 +106,10 @@ function mountRoutes() {
   app.use('/api/admin-registrations', adminRegistrationsRoutes);
   app.use('/api/driver-registrations', driverRegistrationsRoutes);
 
+  if (typeof dbModule.startBackgroundReconnect === 'function') {
+    dbModule.startBackgroundReconnect();
+  }
+
   app.use((err, _req, res, _next) => {
     console.error('[error]', err);
     res
@@ -144,9 +148,6 @@ function mountRoutes() {
 
   const { startBackupScheduler } = require('./services/backup/backupScheduler');
   startBackupScheduler();
-  if (typeof dbModule.startBackgroundReconnect === 'function') {
-    dbModule.startBackgroundReconnect();
-  }
 }
 
 app.listen(PORT, '0.0.0.0', () => {

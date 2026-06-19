@@ -4,7 +4,7 @@
  *
  *   node scripts/timeweb-deploy.js
  */
-require('dotenv').config({ path: require('path').join(__dirname, '../timeweb.env') });
+require('dotenv').config({ path: require('path').join(__dirname, '../timeweb.env'), override: true });
 const fs = require('fs');
 const path = require('path');
 
