@@ -11,10 +11,7 @@ function createDatabase() {
   }
 
   if (isPostgresEnabled()) {
-    const fastStartup =
-      options.fastStartup !== undefined
-        ? options.fastStartup
-        : process.env.DB_FAST_STARTUP !== 'false';
+    const fastStartup = process.env.DB_FAST_STARTUP !== 'false';
     return require('./database/postgres').init({ fastStartup });
   }
   console.log('[data] PostgreSQL not configured — using SQLite fallback');
