@@ -232,37 +232,38 @@ async function reconnectInBackground(onConnected, onError) {
     for (const host of hostCandidates) {
       console.log(`[data] PostgreSQL trying host ${host} (round ${round}/${maxRounds})`);
       for (let attempt = 1; attempt <= attemptsPerHost; attempt += 1) {
-      const connectionString = buildConnectionString(host);
-      const pool = new Pool({
-        ...createPoolConfig(connectionString, host),
-        connectionTimeoutMillis: 10000,
-      });
-      attachPoolHandlers(pool);
+        const connectionString = buildConnectionString(host);
+        const pool = new Pool({
+          ...createPoolConfig(connectionString, host),
+          connectionTimeoutMillis: 10000,
+        });
+        attachPoolHandlers(pool);
 
-      try {
-        console.warn(
-          `[data] PostgreSQL background retry ${attempt}/${attemptsPerHost} on ${host}`
-        );
-        await queryWithTimeout(pool, 'SELECT 1');
-        const db = await setupPostgresPool(pool);
-        onConnected(db);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (typeof onError === 'function') onError(error);
-        pool.end().catch(() => {});
-        if (!isRetryablePostgresError(error) && attempt === attemptsPerHost) {
-          console.error(
-            `[data] PostgreSQL background reconnect failed on ${host}:`,
-            error.message
+        try {
+          console.warn(
+            `[data] PostgreSQL background retry ${attempt}/${attemptsPerHost} on ${host}`
           );
-          break;
+          await queryWithTimeout(pool, 'SELECT 1');
+          const db = await setupPostgresPool(pool);
+          onConnected(db);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (typeof onError === 'function') onError(error);
+          pool.end().catch(() => {});
+          if (!isRetryablePostgresError(error) && attempt === attemptsPerHost) {
+            console.error(
+              `[data] PostgreSQL background reconnect failed on ${host}:`,
+              error.message
+            );
+            break;
+          }
+          const delayMs = Math.min(attempt * 2000, 15000);
+          console.warn(
+            `[data] PostgreSQL background retry ${attempt}/${attemptsPerHost} on ${host} failed (${error.code || error.message}), next in ${delayMs}ms`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
-        const delayMs = Math.min(attempt * 2000, 15000);
-        console.warn(
-          `[data] PostgreSQL background retry ${attempt}/${attemptsPerHost} on ${host} failed (${error.code || error.message}), next in ${delayMs}ms`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
   }
