@@ -2,15 +2,10 @@ services:
   app:
     build: .
     restart: unless-stopped
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    expose:
-      - "3000"
-    ports:
-      - "54100:3000"
+    # Host network: VM private IP (192.168.0.6) can reach PostgreSQL (192.168.0.5)
+    network_mode: host
     environment:
-      PORT: "3000"
+      PORT: ${PORT:-54100}
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-}
       DB_HOST: ${DB_HOST:-}
