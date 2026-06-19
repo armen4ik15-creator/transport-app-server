@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function resolveDataDir() {
@@ -8,6 +9,7 @@ function resolveDataDir() {
   }
   candidates.push('/data');
   candidates.push(path.join(__dirname, '..', 'data'));
+  candidates.push(path.join(os.tmpdir(), 'reestrpro-data'));
 
   for (const dir of candidates) {
     try {
@@ -19,7 +21,7 @@ function resolveDataDir() {
     }
   }
 
-  return path.join(__dirname, '..', 'data');
+  return path.join(os.tmpdir(), 'reestrpro-data');
 }
 
 const DATA_DIR = resolveDataDir();
