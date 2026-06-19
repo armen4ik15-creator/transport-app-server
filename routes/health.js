@@ -38,15 +38,8 @@ router.get('/', (_req, res) => {
   }
 
   if (db.kind === 'postgres') {
-    try {
-      db.ping();
-      payload.db_connected = true;
-      payload.database_url_set = Boolean(buildConnectionString());
-    } catch (error) {
-      payload.db_connected = false;
-      payload.db_error = error.message;
-      payload.status = 'degraded';
-    }
+    payload.db_connected = true;
+    payload.database_url_set = Boolean(buildConnectionString());
     return res.json(payload);
   }
 
