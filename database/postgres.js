@@ -1,6 +1,6 @@
 const deasync = require('deasync');
 const { Pool } = require('pg');
-const { buildConnectionString, resolveSslConfig } = require('./connection');
+const { buildConnectionString, getHostCandidates, resolveSslConfig } = require('./connection');
 const { normalizeSqlForPostgres } = require('./sqlNormalize');
 const { SCHEMA_SQL } = require('./postgresSchema');
 const { seedAdminAsync } = require('./seedUsers');
@@ -88,9 +88,9 @@ function attachPoolHandlers(pool) {
   });
 }
 
-function createPoolConfig(connectionString) {
+function createPoolConfig(connectionString, hostOverride) {
   const sessionOptions = '-c idle_session_timeout=0 -c idle_in_transaction_session_timeout=0';
-  const host = process.env.DB_HOST || '';
+  const host = hostOverride || process.env.DB_HOST || '';
   const usePrivateHost = /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
 
   const baseConfig = {
@@ -220,42 +220,48 @@ function init(options = {}) {
 }
 
 async function reconnectInBackground(onConnected, onError) {
-  const connectionString = buildConnectionString();
-  if (!connectionString) return;
+  const hostCandidates = getHostCandidates();
+  if (hostCandidates.length === 0) return;
 
   console.log('[data] PostgreSQL background reconnect loop running');
   const maxAttempts = Number(process.env.DB_BACKGROUND_RETRIES || 60);
   let lastError = null;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const pool = new Pool({
-      ...createPoolConfig(connectionString),
-      connectionTimeoutMillis: 10000,
-    });
-    attachPoolHandlers(pool);
+  for (const host of hostCandidates) {
+    console.log(`[data] PostgreSQL trying host ${host}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const connectionString = buildConnectionString(host);
+      const pool = new Pool({
+        ...createPoolConfig(connectionString, host),
+        connectionTimeoutMillis: 10000,
+      });
+      attachPoolHandlers(pool);
 
-    try {
-      console.warn(
-        `[data] PostgreSQL background retry ${attempt}/${maxAttempts} starting`
-      );
-      await queryWithTimeout(pool, 'SELECT 1');
-      const db = await setupPostgresPool(pool);
-      onConnected(db);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (typeof onError === 'function') onError(error);
-      pool.end().catch(() => {});
-      if (!isRetryablePostgresError(error) && attempt === maxAttempts) {
-        console.error('[data] PostgreSQL background reconnect failed:', error.message);
-        setTimeout(() => reconnectInBackground(onConnected, onError), 30000);
+      try {
+        console.warn(
+          `[data] PostgreSQL background retry ${attempt}/${maxAttempts} on ${host}`
+        );
+        await queryWithTimeout(pool, 'SELECT 1');
+        const db = await setupPostgresPool(pool);
+        onConnected(db);
         return;
+      } catch (error) {
+        lastError = error;
+        if (typeof onError === 'function') onError(error);
+        pool.end().catch(() => {});
+        if (!isRetryablePostgresError(error) && attempt === maxAttempts) {
+          console.error(
+            `[data] PostgreSQL background reconnect failed on ${host}:`,
+            error.message
+          );
+          break;
+        }
+        const delayMs = Math.min(attempt * 2000, 15000);
+        console.warn(
+          `[data] PostgreSQL background retry ${attempt}/${maxAttempts} on ${host} failed (${error.code || error.message}), next in ${delayMs}ms`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-      const delayMs = Math.min(attempt * 2000, 15000);
-      console.warn(
-        `[data] PostgreSQL background retry ${attempt}/${maxAttempts} failed (${error.code || error.message}), next in ${delayMs}ms`
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 

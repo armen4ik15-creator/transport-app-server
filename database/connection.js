@@ -1,8 +1,8 @@
-function buildConnectionString() {
-  if (process.env.DATABASE_URL) {
+function buildConnectionString(hostOverride) {
+  if (process.env.DATABASE_URL && !hostOverride) {
     return process.env.DATABASE_URL;
   }
-  const host = process.env.DB_HOST;
+  const host = hostOverride || process.env.DB_HOST;
   const user = process.env.DB_USER;
   const password = process.env.DB_PASSWORD;
   const database = process.env.DB_NAME || 'default_db';
@@ -14,6 +14,22 @@ function buildConnectionString() {
   const encodedPassword = encodeURIComponent(password);
   const timeoutSec = Number(process.env.DB_CONNECT_TIMEOUT_SEC || 10);
   return `postgresql://${encodedUser}:${encodedPassword}@${host}:${port}/${database}?connect_timeout=${timeoutSec}`;
+}
+
+function getHostCandidates() {
+  const hosts = [];
+  const addHost = (value) => {
+    const host = String(value || '').trim();
+    if (host && !hosts.includes(host)) {
+      hosts.push(host);
+    }
+  };
+
+  addHost(process.env.DB_HOST);
+  for (const host of String(process.env.DB_FALLBACK_HOSTS || '').split(',')) {
+    addHost(host);
+  }
+  return hosts;
 }
 
 function resolveSslConfig(connectionString) {
@@ -50,6 +66,7 @@ function getPostgresEnvDiagnostics() {
 
 module.exports = {
   buildConnectionString,
+  getHostCandidates,
   resolveSslConfig,
   isPostgresEnabled,
   getPostgresEnvDiagnostics,
