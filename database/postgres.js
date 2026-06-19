@@ -146,10 +146,27 @@ function isRetryablePostgresError(error) {
     error.code === 'ENOTFOUND' ||
     error.code === 'ETIMEDOUT' ||
     error.code === 'ECONNREFUSED' ||
+    error.code === 'ENETUNREACH' ||
+    error.code === 'EHOSTUNREACH' ||
     error.code === '40P01' ||
     error.code === '57P05' ||
-    /idle-session timeout/i.test(error.message || '')
+    /idle-session timeout/i.test(error.message || '') ||
+    /connection timeout/i.test(error.message || '')
   );
+}
+
+async function queryWithTimeout(pool, sql, timeoutMs = 12000) {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' }));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([pool.query(sql), timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 function waitMs(ms) {
   const start = Date.now();
@@ -221,7 +238,7 @@ async function reconnectInBackground(onConnected, onError) {
       console.warn(
         `[data] PostgreSQL background retry ${attempt}/${maxAttempts} starting`
       );
-      await pool.query('SELECT 1');
+      await queryWithTimeout(pool, 'SELECT 1');
       const db = await setupPostgresPool(pool);
       onConnected(db);
       return;

@@ -2,6 +2,8 @@ services:
   app:
     build: .
     restart: unless-stopped
+    extra_hosts:
+      - "1756419aab4db7a5730b6d59.twc1.net:186.246.12.45"
     expose:
       - "3000"
     ports:
