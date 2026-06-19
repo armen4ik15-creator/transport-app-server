@@ -82,6 +82,16 @@ function createDbFacade(pool) {
   };
 }
 
+function attachPoolHandlers(pool) {
+  pool.on('error', (err) => {
+    console.error('[data] PostgreSQL pool error:', err.message);
+  });
+  pool.on('connect', (client) => {
+    client.query("SET idle_session_timeout TO '0'").catch(() => {});
+    client.query("SET idle_in_transaction_session_timeout TO '0'").catch(() => {});
+  });
+}
+
 function createPoolConfig(connectionString) {
   return {
     connectionString,
@@ -94,13 +104,20 @@ function createPoolConfig(connectionString) {
   };
 }
 
+async function configureSession(client) {
+  await client.query("SET idle_session_timeout TO '0'");
+  await client.query("SET idle_in_transaction_session_timeout TO '0'");
+}
+
 function setupPostgresPool(pool) {
   return (async () => {
     const client = await pool.connect();
     try {
+      await configureSession(client);
       await client.query('SELECT pg_advisory_lock(991001)');
       await client.query(SCHEMA_SQL);
       await seedAdminAsync(client);
+      console.log('[data] PostgreSQL schema + seed complete (async)');
       return createDbFacade(pool);
     } finally {
       await client.query('SELECT pg_advisory_unlock(991001)').catch(() => {});
@@ -116,7 +133,8 @@ function isRetryablePostgresError(error) {
     error.code === 'ETIMEDOUT' ||
     error.code === 'ECONNREFUSED' ||
     error.code === '40P01' ||
-    error.code === '57P05'
+    error.code === '57P05' ||
+    /idle-session timeout/i.test(error.message || '')
   );
 }
 function waitMs(ms) {
@@ -144,10 +162,7 @@ function init(options = {}) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const pool = new Pool(createPoolConfig(connectionString));
-
-    pool.on('error', (err) => {
-      console.error('[data] PostgreSQL pool error:', err.message);
-    });
+    attachPoolHandlers(pool);
 
     try {
       waitPromise(pool.query('SELECT 1'));
@@ -173,7 +188,7 @@ function init(options = {}) {
   return createFailedAdapter(lastError || new Error('PostgreSQL init failed'));
 }
 
-async function reconnectInBackground(onConnected) {
+async function reconnectInBackground(onConnected, onError) {
   const connectionString = buildConnectionString();
   if (!connectionString) return;
 
@@ -185,6 +200,7 @@ async function reconnectInBackground(onConnected) {
       ...createPoolConfig(connectionString),
       connectionTimeoutMillis: 10000,
     });
+    attachPoolHandlers(pool);
 
     try {
       await pool.query('SELECT 1');
@@ -193,10 +209,11 @@ async function reconnectInBackground(onConnected) {
       return;
     } catch (error) {
       lastError = error;
+      if (typeof onError === 'function') onError(error);
       pool.end().catch(() => {});
       if (!isRetryablePostgresError(error) && attempt === maxAttempts) {
         console.error('[data] PostgreSQL background reconnect failed:', error.message);
-        setTimeout(() => reconnectInBackground(onConnected), 30000);
+        setTimeout(() => reconnectInBackground(onConnected, onError), 30000);
         return;
       }
       const delayMs = Math.min(attempt * 2000, 15000);
@@ -208,7 +225,7 @@ async function reconnectInBackground(onConnected) {
   }
 
   console.error('[data] PostgreSQL background reconnect gave up:', lastError?.message);
-  setTimeout(() => reconnectInBackground(onConnected), 30000);
+  setTimeout(() => reconnectInBackground(onConnected, onError), 30000);
 }
 
 module.exports = { init, reconnectInBackground };

@@ -1,6 +1,6 @@
 const { isPostgresEnabled, getPostgresEnvDiagnostics } = require('./database/connection');
 
-const dbState = { current: null };
+const dbState = { current: null, lastReconnectError: null };
 let reconnectStarted = false;
 
 function createDatabase() {
@@ -49,26 +49,36 @@ function startBackgroundReconnect() {
   if (db.kind === 'postgres') return;
   reconnectStarted = true;
 
-  require('./database/postgres').reconnectInBackground((nextDb) => {
-    setDb(nextDb);
-    console.log('[data] PostgreSQL connected (background retry)');
-    try {
-      const { ensureTripSchema } = require('./routes/trips');
-      if (typeof ensureTripSchema === 'function') {
-        ensureTripSchema();
+  require('./database/postgres').reconnectInBackground(
+    (nextDb) => {
+      setDb(nextDb);
+      dbState.lastReconnectError = null;
+      console.log('[data] PostgreSQL connected (background retry)');
+      try {
+        const { ensureTripSchema } = require('./routes/trips');
+        if (typeof ensureTripSchema === 'function') {
+          ensureTripSchema();
+        }
+      } catch (error) {
+        console.warn('[data] post-reconnect schema migration skipped:', error.message);
       }
-    } catch (error) {
-      console.warn('[data] post-reconnect schema migration skipped:', error.message);
-    }
-    try {
-      const { restartBackupScheduler } = require('./services/backup/backupScheduler');
-      if (typeof restartBackupScheduler === 'function') {
-        restartBackupScheduler();
+      try {
+        const { restartBackupScheduler } = require('./services/backup/backupScheduler');
+        if (typeof restartBackupScheduler === 'function') {
+          restartBackupScheduler();
+        }
+      } catch (error) {
+        console.warn('[data] backup scheduler restart skipped:', error.message);
       }
-    } catch (error) {
-      console.warn('[data] backup scheduler restart skipped:', error.message);
+    },
+    (error) => {
+      dbState.lastReconnectError = error;
+      const db = getDb();
+      if (db?.kind === 'postgres_error') {
+        db.initError = error;
+      }
     }
-  });
+  );
 }
 
 const dbProxy = new Proxy(

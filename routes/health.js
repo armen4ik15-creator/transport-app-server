@@ -28,7 +28,9 @@ router.get('/', (_req, res) => {
   if (db.kind === 'postgres_error') {
     payload.status = 'degraded';
     payload.db_connected = false;
-    payload.db_error = db.initError?.message || 'PostgreSQL connection failed';
+    const cause = db.initError?.internalCause || db.initError;
+    payload.db_error = cause?.message || db.initError?.message || 'PostgreSQL connection failed';
+    if (cause?.code) payload.db_error_code = cause.code;
     payload.hint =
       'Reset gen_user password in DB panel, copy the same value to DB_PASSWORD, click Save, redeploy.';
     return res.json(payload);
