@@ -90,17 +90,37 @@ function attachPoolHandlers(pool) {
 
 function createPoolConfig(connectionString) {
   const sessionOptions = '-c idle_session_timeout=0 -c idle_in_transaction_session_timeout=0';
+  const host = process.env.DB_HOST || '';
+  const usePrivateHost = /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+  const baseConfig = {
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
+  };
+
+  if (host && process.env.DB_USER && process.env.DB_PASSWORD) {
+    return {
+      ...baseConfig,
+      host,
+      port: Number(process.env.DB_PORT || 5432),
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME || 'default_db',
+      ssl: usePrivateHost ? false : resolveSslConfig(connectionString),
+      options: sessionOptions,
+    };
+  }
+
   const separator = connectionString.includes('?') ? '&' : '?';
   const connectionWithSession = `${connectionString}${separator}options=${encodeURIComponent(sessionOptions)}`;
 
   return {
     connectionString: connectionWithSession,
     ssl: resolveSslConfig(connectionString),
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000,
-    keepAlive: true,
-    keepAliveInitialDelayMillis: 10000,
+    ...baseConfig,
   };
 }
 
