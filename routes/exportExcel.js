@@ -19,6 +19,7 @@ const EXPENSE_TYPE_LABELS = {
   toll: 'Платные дороги',
   fine: 'Штрафы',
   dps: 'ДПС',
+  supplies: 'Мелкие расходники',
   lease: 'Аренда/Лизинг',
   bank_fee: 'Банковские комиссии',
   other: 'Прочие расходы',
@@ -26,9 +27,22 @@ const EXPENSE_TYPE_LABELS = {
   dividend: 'Дивиденды',
 };
 
+function expenseStatusLabel(value) {
+  if (!value || value === 'approved') return 'Одобрено';
+  if (value === 'pending') return 'На проверке';
+  if (value === 'rejected') return 'Отклонено';
+  return value;
+}
+
 function expenseTypeLabel(value) {
   if (!value) return '';
   return EXPENSE_TYPE_LABELS[value] || value;
+}
+
+function expenseSourceLabel(value) {
+  if (value === 'driver') return 'Водитель (компенсация)';
+  if (value === 'system') return 'Система';
+  return 'Админ';
 }
 
 const REGISTRY_HEADERS = [
@@ -166,7 +180,7 @@ function fetchCompletedTrips({ dateFrom, dateTo, driverId, vehiclePlate }) {
 }
 
 function fetchExpenses({ dateFrom, dateTo, driverId }) {
-  const where = [];
+  const where = ["(e.status IS NULL OR e.status = 'approved')"];
   const params = [];
 
   if (driverId) {
@@ -182,7 +196,9 @@ function fetchExpenses({ dateFrom, dateTo, driverId }) {
          u.full_name AS driver_name,
          e.exp_type,
          e.amount,
-         COALESCE(e.comment, '') AS comment
+         COALESCE(e.comment, '') AS comment,
+         COALESCE(e.status, 'approved') AS status,
+         COALESCE(e.source, 'admin') AS source
        FROM expenses e
        LEFT JOIN drivers d ON d.id = e.driver_id
        LEFT JOIN users u ON u.id = d.user_id
@@ -293,17 +309,31 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
   });
 
   const expensesSheet = workbook.addWorksheet('Расходы');
-  addHeaderRow(expensesSheet, ['Дата', 'Водитель', 'Тип расхода', 'Сумма', 'Комментарий']);
+  addHeaderRow(expensesSheet, [
+    'Дата',
+    'Водитель',
+    'Тип расхода',
+    'Сумма',
+    'Статус',
+    'Источник',
+    'Комментарий',
+  ]);
 
   let totalExpenses = 0;
+  let driverCompensations = 0;
   expenseRows.forEach((row) => {
     const amount = asNumber(row.amount);
     totalExpenses += amount;
+    if (row.source === 'driver') {
+      driverCompensations += amount;
+    }
     expensesSheet.addRow([
       row.row_date ?? '',
       row.driver_name ?? '',
       expenseTypeLabel(row.exp_type),
       amount,
+      expenseStatusLabel(row.status),
+      expenseSourceLabel(row.source),
       row.comment ?? '',
     ]);
   });
@@ -313,8 +343,22 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
     '',
     'Зарплата водителя (из рейсов)',
     totalDriverPay,
+    '',
+    '',
     `${tripRows.length} рейсов`,
   ]);
+
+  if (driverCompensations > 0) {
+    expensesSheet.addRow([
+      '',
+      '',
+      'Компенсации водителям (личные расходы)',
+      driverCompensations,
+      'Одобрено',
+      'Водитель',
+      '',
+    ]);
+  }
 
   const totalCosts = totalExpenses + totalDriverPay;
   const profit = totalRevenue - totalCosts;
@@ -323,6 +367,9 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
   addHeaderRow(profitSheet, ['Показатель', 'Сумма, ₽']);
   profitSheet.addRow(['Выручка (из рейсов)', totalRevenue]);
   profitSheet.addRow(['Расходы (учёт)', totalExpenses]);
+  if (driverCompensations > 0) {
+    profitSheet.addRow(['в т.ч. компенсации водителям', driverCompensations]);
+  }
   profitSheet.addRow(['Зарплата водителей (из рейсов)', totalDriverPay]);
   profitSheet.addRow(['Итого расходов', totalCosts]);
   profitSheet.addRow(['Прибыль', profit]);
@@ -400,7 +447,15 @@ router.get('/expenses', async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Расходы');
-    addHeaderRow(sheet, ['Дата', 'Водитель', 'Тип расхода', 'Сумма', 'Комментарий']);
+    addHeaderRow(sheet, [
+      'Дата',
+      'Водитель',
+      'Тип расхода',
+      'Сумма',
+      'Статус',
+      'Источник',
+      'Комментарий',
+    ]);
 
     expenseRows.forEach((row) => {
       sheet.addRow([
@@ -408,6 +463,8 @@ router.get('/expenses', async (req, res) => {
         row.driver_name ?? '',
         expenseTypeLabel(row.exp_type),
         asNumber(row.amount),
+        expenseStatusLabel(row.status),
+        expenseSourceLabel(row.source),
         row.comment ?? '',
       ]);
     });

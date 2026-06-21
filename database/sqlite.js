@@ -371,6 +371,11 @@ function migrate(db) {
   ensureColumn(db, 'driver_payments', 'period_start', 'period_start TEXT');
   ensureColumn(db, 'driver_payments', 'period_end', 'period_end TEXT');
   ensureColumn(db, 'contractor_payments', 'payment_date', 'payment_date TEXT');
+  ensureColumn(db, 'expenses', 'status', `status TEXT DEFAULT 'approved'`);
+  ensureColumn(db, 'expenses', 'source', `source TEXT DEFAULT 'admin'`);
+  ensureColumn(db, 'expenses', 'rejection_reason', 'rejection_reason TEXT');
+  ensureColumn(db, 'expenses', 'photo_path', 'photo_path TEXT');
+  ensureColumn(db, 'expenses', 'updated_at', 'updated_at TEXT');
 }
 
 function seedAdmin(db) {

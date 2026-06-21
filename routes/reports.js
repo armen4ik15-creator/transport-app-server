@@ -74,7 +74,7 @@ function fetchTripDaily({ from, to, driverId }) {
 }
 
 function fetchExpenseDaily({ from, to, driverId }) {
-  const where = [];
+  const where = ["(e.status IS NULL OR e.status = 'approved')"];
   const params = [];
   if (driverId) {
     where.push('e.driver_id = ?');

@@ -51,6 +51,28 @@ function calcDriverDeductions(db, driverId, dateFrom, dateTo) {
   return asNumber(row?.total);
 }
 
+function calcDriverCompensations(db, driverId, dateFrom, dateTo) {
+  if (!driverId || !dateFrom || !dateTo) return 0;
+
+  const where = ["e.source = 'driver'", "e.status = 'approved'", 'e.driver_id = ?'];
+  const params = [driverId];
+
+  where.push('date(e.exp_date) >= date(?)');
+  params.push(dateFrom);
+  where.push('date(e.exp_date) <= date(?)');
+  params.push(dateTo);
+
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(e.amount), 0) AS total
+       FROM expenses e
+       WHERE ${where.join(' AND ')}`
+    )
+    .get(...params);
+
+  return asNumber(row?.total);
+}
+
 function calcDriverPayouts(db, driverId, dateFrom, dateTo) {
   if (!driverId || !dateFrom || !dateTo) return 0;
 
@@ -154,6 +176,7 @@ module.exports = {
   COMPLETED_TRIP_SQL,
   asNumber,
   calcDriverTripAccrued,
+  calcDriverCompensations,
   calcDriverDeductions,
   calcDriverPayouts,
   formatPeriodLabel,

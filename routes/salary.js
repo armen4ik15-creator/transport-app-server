@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const {
+  calcDriverCompensations,
   calcDriverDeductions,
   calcDriverTripAccrued,
   parseIsoDate,
@@ -74,6 +75,7 @@ router.get('/accrued', (req, res) => {
   if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
 
   const accrued = calcDriverTripAccrued(db, driverId, from, to);
+  const compensations = calcDriverCompensations(db, driverId, from, to);
   const deductions = calcDriverDeductions(db, driverId, from, to);
 
   return res.json({
@@ -81,8 +83,9 @@ router.get('/accrued', (req, res) => {
     from,
     to,
     accrued,
+    compensations,
     deductions,
-    net: accrued + deductions,
+    net: accrued + compensations + deductions,
   });
 });
 
@@ -156,7 +159,9 @@ router.get('/summary', (req, res) => {
   const periodStart = from ?? '1970-01-01';
   const periodEnd = to ?? '2099-12-31';
 
-  const gross = calcDriverTripAccrued(db, driverId, periodStart, periodEnd);
+  const grossTrips = calcDriverTripAccrued(db, driverId, periodStart, periodEnd);
+  const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
+  const gross = grossTrips + compensations;
   const deducted = calcDriverDeductions(db, driverId, periodStart, periodEnd);
 
   const payments = db
@@ -176,6 +181,8 @@ router.get('/summary', (req, res) => {
   return res.json({
     driver_id: driverId,
     gross,
+    gross_trips: grossTrips,
+    compensations,
     paid,
     deducted,
     debt,
@@ -193,7 +200,14 @@ router.get('/debts', (_req, res) => {
     .all();
 
   const rows = drivers.map((driver) => {
-    const gross = calcDriverTripAccrued(db, driver.driver_id, '1970-01-01', '2099-12-31');
+    const grossTrips = calcDriverTripAccrued(db, driver.driver_id, '1970-01-01', '2099-12-31');
+    const compensations = calcDriverCompensations(
+      db,
+      driver.driver_id,
+      '1970-01-01',
+      '2099-12-31'
+    );
+    const gross = grossTrips + compensations;
     const deducted = calcDriverDeductions(db, driver.driver_id, '1970-01-01', '2099-12-31');
     const payments = db
       .prepare(
@@ -210,6 +224,8 @@ router.get('/debts', (_req, res) => {
       driver_name: driver.driver_name,
       driver_car_number: driver.driver_car_number,
       gross,
+      gross_trips: grossTrips,
+      compensations,
       paid,
       deducted,
       debt,
