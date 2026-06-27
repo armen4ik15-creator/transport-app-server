@@ -75,6 +75,7 @@ function mountRoutes() {
   const dashboardRoutes = require('./routes/dashboard');
   const { router: adminRegistrationsRoutes } = require('./routes/adminRegistrations');
   const { router: driverRegistrationsRoutes } = require('./routes/driverRegistrations');
+  const adminPurgeRoutes = require('./routes/adminPurge');
 
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', requireDatabase, authRoutes);
@@ -102,6 +103,7 @@ function mountRoutes() {
   app.use('/api/earnings', earningsRoutes);
   app.use('/api/salary', salaryRoutes);
   app.use('/api/backups', backupsRoutes);
+  app.use('/api/admin', adminPurgeRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/admin-registrations', adminRegistrationsRoutes);
   app.use('/api/driver-registrations', driverRegistrationsRoutes);
