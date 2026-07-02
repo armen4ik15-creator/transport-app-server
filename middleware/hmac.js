@@ -28,6 +28,9 @@ function normalizeBodyForSigning(body) {
   if (body == null || body === '') return '';
   if (typeof body === 'string') return body;
   if (Buffer.isBuffer(body)) return body.toString('utf8');
+  if (typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length === 0) {
+    return '';
+  }
   try {
     return JSON.stringify(body);
   } catch {
