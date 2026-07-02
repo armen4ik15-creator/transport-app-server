@@ -94,7 +94,7 @@ function createPoolConfig(connectionString, hostOverride) {
   const usePrivateHost = /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
 
   const baseConfig = {
-    max: 10,
+    max: Number(process.env.DB_POOL_MAX || 25),
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
     keepAlive: true,
