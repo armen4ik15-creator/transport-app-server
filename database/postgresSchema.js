@@ -364,6 +364,18 @@ CREATE TABLE IF NOT EXISTS device_secrets (
 
 CREATE INDEX IF NOT EXISTS idx_device_secrets_user ON device_secrets(user_id);
 CREATE INDEX IF NOT EXISTS idx_device_secrets_blocked ON device_secrets(blocked);
+
+CREATE TABLE IF NOT EXISTS vehicle_documents (
+  id SERIAL PRIMARY KEY,
+  vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+  doc_type TEXT NOT NULL CHECK(doc_type IN ('sts', 'contract', 'pts', 'insurance', 'driver_passport')),
+  file_path TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_documents_vehicle ON vehicle_documents(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_documents_type ON vehicle_documents(doc_type);
 `;
 
 module.exports = { SCHEMA_SQL };

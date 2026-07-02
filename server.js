@@ -82,7 +82,7 @@ function mountRoutes() {
   const dashboardRoutes = require('./routes/dashboard');
   const { router: adminRegistrationsRoutes } = require('./routes/adminRegistrations');
   const { router: driverRegistrationsRoutes } = require('./routes/driverRegistrations');
-  const adminPurgeRoutes = require('./routes/adminPurge');
+  const vehicleDocumentsRoutes = require('./routes/vehicleDocuments');
 
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', requireDatabase, authRoutes);
@@ -100,6 +100,7 @@ function mountRoutes() {
   app.use('/api/order-templates', orderTemplatesRoutes);
   app.use('/api/materials', materialsRoutes);
   app.use('/api/vehicles', vehiclesRoutes);
+  app.use('/api/vehicle-documents', vehicleDocumentsRoutes);
   app.use('/api/waybills', waybillsRoutes);
   app.use('/api/invoices', invoicesRoutes);
   app.use('/api/notifications', notificationsRoutes);
