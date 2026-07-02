@@ -24,9 +24,12 @@ function getLocalIpv4Addresses() {
   return Array.from(ips);
 }
 
+const { responseNoiseMiddleware } = require('./middleware/responseNoise');
+
 app.use(compression());
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
+app.use(responseNoiseMiddleware);
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/api/health/live', (_req, res) => {
@@ -47,6 +50,10 @@ function mountRoutes() {
 
   const { requireDatabase } = require('./middleware/dbReady');
   const { authMiddleware } = require('./middleware/auth');
+  const { hmacMiddleware } = require('./middleware/hmac');
+  const deviceRoutes = require('./routes/device');
+  const heartbeatRoutes = require('./routes/heartbeat');
+  const killSwitchRoutes = require('./routes/killSwitch');
   const healthRoutes = require('./routes/health');
   const authRoutes = require('./routes/auth');
   const driversRoutes = require('./routes/drivers');
@@ -79,7 +86,10 @@ function mountRoutes() {
 
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', requireDatabase, authRoutes);
+  app.use('/api/device', requireDatabase, deviceRoutes);
+  app.use('/api/heartbeat', requireDatabase, heartbeatRoutes);
   app.use('/api', authMiddleware, requireDatabase);
+  app.use('/api', hmacMiddleware);
   app.use('/api/drivers', driversRoutes);
   app.use('/api/contractors', contractorPaymentsRoutes);
   app.use('/api/contractors', contractorsRoutes);
@@ -104,6 +114,7 @@ function mountRoutes() {
   app.use('/api/salary', salaryRoutes);
   app.use('/api/backups', backupsRoutes);
   app.use('/api/admin', adminPurgeRoutes);
+  app.use('/api/admin', killSwitchRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/admin-registrations', adminRegistrationsRoutes);
   app.use('/api/driver-registrations', driverRegistrationsRoutes);

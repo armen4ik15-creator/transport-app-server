@@ -338,6 +338,26 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_fuel_transactions_driver ON fuel_transactions(driver_id);
     CREATE INDEX IF NOT EXISTS idx_fuel_transactions_date ON fuel_transactions(transaction_at);
     CREATE INDEX IF NOT EXISTS idx_fuel_sync_logs_started ON fuel_sync_logs(started_at);
+
+    CREATE TABLE IF NOT EXISTS device_secrets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      secret TEXT NOT NULL,
+      activation_token TEXT NOT NULL,
+      platform TEXT,
+      app_version TEXT,
+      blocked INTEGER NOT NULL DEFAULT 0,
+      block_reason TEXT,
+      blocked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      blocked_at TEXT,
+      last_heartbeat_at TEXT,
+      last_seen_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_secrets_user ON device_secrets(user_id);
+    CREATE INDEX IF NOT EXISTS idx_device_secrets_blocked ON device_secrets(blocked);
   `);
 
   ensureColumn(db, 'users', 'full_name', 'full_name TEXT');
