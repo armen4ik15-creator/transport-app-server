@@ -202,7 +202,13 @@ router.get('/summary', (req, res) => {
   });
 });
 
-router.post('/', upload.single('photo'), (req, res) => {
+router.post('/', (req, res, next) => {
+  const contentType = String(req.headers['content-type'] || '');
+  if (contentType.includes('multipart/form-data')) {
+    return upload.single('photo')(req, res, next);
+  }
+  next();
+}, (req, res) => {
   const action = resolveAction(req.body);
   const { order_id, ttn_number, volume, note } = req.body || {};
   const orderId = Number(order_id);
