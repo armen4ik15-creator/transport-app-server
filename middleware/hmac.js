@@ -13,6 +13,7 @@ const HMAC_EXCLUDED_PREFIXES = [
   '/api/auth/forgot-password',
   '/api/auth/security-config',
   '/api/auth/migrate-founder',
+  '/api/auth/reset-device',
   '/api/device/register',
   '/api/heartbeat',
 ];

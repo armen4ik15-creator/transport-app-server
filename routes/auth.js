@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const db = require('../database');
 const { signToken } = require('../utils/jwt');
@@ -301,6 +302,68 @@ router.post('/login', (req, res) => {
       full_name: user.full_name || null,
       phone: user.phone || null,
     },
+  });
+});
+
+function generateDeviceSecret() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function generateDeviceActivationToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+router.post('/reset-device', authMiddleware, (req, res) => {
+  const deviceId = String(req.body?.device_id || '').trim();
+  if (!deviceId || deviceId.length < 8) {
+    return res.status(400).json({ error: 'device_id обязателен (минимум 8 символов)' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, user_id, blocked, block_reason
+       FROM device_secrets
+       WHERE device_id = ?`
+    )
+    .get(deviceId);
+
+  const secret = generateDeviceSecret();
+  const activationToken = generateDeviceActivationToken();
+  const now = new Date().toISOString();
+
+  if (existing) {
+    if (Number(existing.blocked) === 1) {
+      return res.status(403).json({
+        error: existing.block_reason || 'Устройство заблокировано',
+        blocked: true,
+      });
+    }
+
+    db.prepare(
+      `UPDATE device_secrets
+       SET user_id = ?, secret = ?, activation_token = ?, last_seen_at = ?
+       WHERE id = ?`
+    ).run(req.user.id, secret, activationToken, now, existing.id);
+
+    return res.json({
+      device_id: deviceId,
+      secret,
+      activation_token: activationToken,
+      reset: true,
+    });
+  }
+
+  db.prepare(
+    `INSERT INTO device_secrets
+     (device_id, user_id, secret, activation_token, platform, app_version, created_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(deviceId, req.user.id, secret, activationToken, 'unknown', 'unknown', now, now);
+
+  return res.status(201).json({
+    device_id: deviceId,
+    secret,
+    activation_token: activationToken,
+    reset: true,
   });
 });
 
