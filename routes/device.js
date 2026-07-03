@@ -39,7 +39,31 @@ router.post('/register', authMiddleware, (req, res) => {
     }
 
     if (Number(existing.user_id) !== Number(req.user.id)) {
-      return res.status(409).json({ error: 'Устройство уже зарегистрировано другим пользователем' });
+      const reboundSecret = generateSecret();
+      const reboundToken = generateActivationToken();
+      const reboundNow = new Date().toISOString();
+
+      db.prepare(
+        `UPDATE device_secrets
+         SET user_id = ?, secret = ?, activation_token = ?, platform = ?, app_version = ?, last_seen_at = ?
+         WHERE id = ?`
+      ).run(
+        req.user.id,
+        reboundSecret,
+        reboundToken,
+        platform,
+        appVersion,
+        reboundNow,
+        existing.id
+      );
+
+      return res.json({
+        device_id: deviceId,
+        secret: reboundSecret,
+        activation_token: reboundToken,
+        reused: false,
+        rebound: true,
+      });
     }
 
     db.prepare(

@@ -28,7 +28,16 @@ const { responseNoiseMiddleware } = require('./middleware/responseNoise');
 
 app.use(compression());
 app.use(cors());
-app.use(express.json({ limit: '5mb' }));
+app.use(
+  express.json({
+    limit: '5mb',
+    verify: (req, _res, buf) => {
+      if (buf?.length) {
+        req.rawBody = buf.toString('utf8');
+      }
+    },
+  })
+);
 app.use(responseNoiseMiddleware);
 app.use('/uploads', express.static(UPLOADS_DIR));
 

@@ -115,7 +115,10 @@ function hmacMiddleware(req, res, next) {
 
   const signature = req.headers[SIGNATURE_HEADER];
   const isMultipart = String(req.headers['content-type'] || '').includes('multipart/form-data');
-  const bodyString = isMultipart ? '' : normalizeBodyForSigning(req.body);
+  const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
+  const bodyString = isMultipart
+    ? ''
+    : rawBody || normalizeBodyForSigning(req.body);
   const payload = buildSignaturePayload(req, timestamp, bodyString);
 
   if (!verifySignature(row.secret, payload, signature)) {
