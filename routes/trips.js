@@ -4,7 +4,7 @@ const express = require('express');
 const multer = require('multer');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
-const { uploadsSubdir } = require('../config/paths');
+const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 
 const router = express.Router();
 
@@ -105,6 +105,28 @@ function parseOptionalNumber(value) {
 
 function cleanupUploadedFile(file) {
   if (file) fs.unlink(file.path, () => {});
+}
+
+function unlinkStoredUpload(filePath) {
+  if (!filePath) return;
+  const relative = String(filePath).replace(/^\/uploads\//, '');
+  if (relative.includes('..')) return;
+  const absolute = path.join(UPLOADS_DIR, relative);
+  try {
+    if (fs.existsSync(absolute)) fs.unlinkSync(absolute);
+  } catch {
+    // ignore file cleanup errors
+  }
+}
+
+function isTripLoading(trip) {
+  return trip.status === 'loading' || (trip.status == null && trip.stage === 'loading');
+}
+
+function deleteTripPhotoFiles(trip) {
+  if (trip.photo_path) {
+    unlinkStoredUpload(trip.photo_path);
+  }
 }
 
 router.get('/', (req, res) => {
@@ -314,6 +336,33 @@ router.post('/', (req, res, next) => {
 
   const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(activeTrip.id);
   return res.json(trip);
+});
+
+router.delete('/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Некорректный id' });
+  }
+
+  const trip = db
+    .prepare('SELECT id, order_id, driver_id, stage, status, photo_path FROM trips WHERE id = ?')
+    .get(id);
+  if (!trip) return res.status(404).json({ error: 'Рейс не найден' });
+
+  if (req.user.role !== 'admin') {
+    const driverId = getDriverIdForUser(req.user.id);
+    if (!driverId || Number(trip.driver_id) !== driverId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    if (!isTripLoading(trip)) {
+      return res.status(403).json({ error: 'Можно удалить только рейс в статусе погрузки' });
+    }
+  }
+
+  deleteTripPhotoFiles(trip);
+
+  db.prepare('DELETE FROM trips WHERE id = ?').run(id);
+  return res.json({ ok: true, message: 'Рейс удалён' });
 });
 
 module.exports = router;
