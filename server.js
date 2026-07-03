@@ -88,6 +88,7 @@ function mountRoutes() {
   app.use('/api/auth', requireDatabase, authRoutes);
   app.use('/api/device', requireDatabase, deviceRoutes);
   app.use('/api/heartbeat', requireDatabase, heartbeatRoutes);
+  app.use('/api/vehicle-documents', requireDatabase, vehicleDocumentsRoutes);
   app.use('/api', authMiddleware, requireDatabase);
   app.use('/api', hmacMiddleware);
   app.use('/api/drivers', driversRoutes);
@@ -100,7 +101,6 @@ function mountRoutes() {
   app.use('/api/order-templates', orderTemplatesRoutes);
   app.use('/api/materials', materialsRoutes);
   app.use('/api/vehicles', vehiclesRoutes);
-  app.use('/api/vehicle-documents', vehicleDocumentsRoutes);
   app.use('/api/waybills', waybillsRoutes);
   app.use('/api/invoices', invoicesRoutes);
   app.use('/api/notifications', notificationsRoutes);
