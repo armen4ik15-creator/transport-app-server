@@ -82,6 +82,7 @@ function mountRoutes() {
   const dashboardRoutes = require('./routes/dashboard');
   const { router: adminRegistrationsRoutes } = require('./routes/adminRegistrations');
   const { router: driverRegistrationsRoutes } = require('./routes/driverRegistrations');
+  const adminPurgeRoutes = require('./routes/adminPurge');
   const vehicleDocumentsRoutes = require('./routes/vehicleDocuments');
 
   app.use('/api/health', healthRoutes);
