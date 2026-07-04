@@ -172,6 +172,48 @@ function mountRoutes() {
 
   const { startBackupScheduler } = require('./services/backup/backupScheduler');
   startBackupScheduler();
+
+  if (process.env.HMAC_DEBUG === '1') {
+    setTimeout(() => dumpDeviceSecretsForDebug(dbModule), 8000);
+  }
+}
+
+/** Временный диагностический дамп привязок устройств (только при HMAC_DEBUG=1). */
+function dumpDeviceSecretsForDebug(dbModule) {
+  try {
+    const rows = dbModule
+      .prepare(
+        `SELECT ds.id, ds.device_id, ds.user_id, u.email, u.role,
+                ds.blocked, ds.block_reason, ds.app_version, ds.platform,
+                length(ds.secret) AS secret_len, ds.last_seen_at
+         FROM device_secrets ds
+         LEFT JOIN users u ON u.id = ds.user_id
+         ORDER BY ds.last_seen_at DESC NULLS LAST, ds.id DESC
+         LIMIT 60`
+      )
+      .all();
+    console.log(`[hmac][DEVICES] count=${rows.length}`);
+    for (const r of rows) {
+      console.log(
+        '[hmac][DEVICE] ' +
+          JSON.stringify({
+            id: r.id,
+            dev: String(r.device_id || '').slice(0, 32),
+            uid: r.user_id,
+            email: r.email,
+            role: r.role,
+            blocked: r.blocked,
+            reason: r.block_reason,
+            ver: r.app_version,
+            plat: r.platform,
+            seclen: r.secret_len,
+            seen: r.last_seen_at,
+          })
+      );
+    }
+  } catch (error) {
+    console.log('[hmac][DEVICES] dump failed:', error.message);
+  }
 }
 
 app.listen(PORT, '0.0.0.0', () => {
