@@ -80,6 +80,39 @@ function buildBodyStringCandidates(req, isMultipart) {
   return [...new Set(candidates)];
 }
 
+/** Диагностика: перебор комбинаций метода/пути/тела, чтобы понять, что именно подписал клиент. */
+function bruteForceSignature(secret, req, timestamp, signature) {
+  const provided = String(signature || '').trim().toLowerCase();
+  const reqPath = String(req.originalUrl || req.url || '').split('?')[0];
+  const fullUrl = String(req.originalUrl || req.url || '');
+  const methods = ['POST', 'GET', 'PUT', 'PATCH', 'post', 'get'];
+  const paths = [
+    ...new Set([
+      reqPath,
+      `${reqPath}/`,
+      fullUrl,
+      reqPath.replace(/^\/api/, ''),
+      `/api${reqPath}`,
+    ]),
+  ];
+  const bodies = ['', '{}', 'null', 'undefined', '[object Object]', '[object FormData]'];
+  const timestamps = [timestamp, String(timestamp)];
+  for (const m of methods) {
+    for (const p of paths) {
+      for (const b of bodies) {
+        for (const t of timestamps) {
+          const payload = `${t}.${m}.${p}.${b}`;
+          const expected = computeSignature(secret, payload);
+          if (expected.toLowerCase() === provided) {
+            return { method: m, path: p, body: b, tsType: typeof t };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function verifyAgainstCandidates(secret, req, timestamp, bodyStrings, signature) {
   for (const bodyString of bodyStrings) {
     const payload = buildSignaturePayload(req, timestamp, bodyString);
@@ -215,6 +248,9 @@ function hmacMiddleware(req, res, next) {
   );
 
   if (!matched) {
+    const brute = process.env.HMAC_DEBUG === '1'
+      ? bruteForceSignature(row.secret, req, timestamp, signature)
+      : null;
     recordHmacEvent({
       outcome: 'invalid_signature',
       method,
@@ -228,6 +264,7 @@ function hmacMiddleware(req, res, next) {
       candidateCount: bodyStrings.length,
       appVersion: row.app_version,
       hasSignature,
+      brute,
     });
     if (process.env.HMAC_DEBUG === '1') {
       logSignatureMismatch(req, row, timestamp, bodyStrings, signature, isMultipart);
