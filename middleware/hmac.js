@@ -45,8 +45,12 @@ function buildSignaturePayload(req, timestamp, bodyString) {
   return `${timestamp}.${method}.${path}.${bodyString}`;
 }
 
+function computeSignature(secret, payload) {
+  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
 function verifySignature(secret, payload, signature) {
-  const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  const expected = computeSignature(secret, payload);
   const provided = String(signature || '').trim().toLowerCase();
   if (!provided || expected.length !== provided.length) return false;
   try {
@@ -56,10 +60,66 @@ function verifySignature(secret, payload, signature) {
   }
 }
 
+/**
+ * Кандидаты канонизации тела запроса.
+ * Разные версии клиентского бандла подписывали тело по-разному
+ * (точный wire-payload rawBody vs ре-сериализация JSON.stringify(req.body)).
+ * Подпись считается валидной, если совпала хотя бы с одним кандидатом —
+ * это устраняет рассинхрон версий, не ослабляя защиту (секрет по-прежнему обязателен).
+ */
+function buildBodyStringCandidates(req, isMultipart) {
+  if (isMultipart) return [''];
+  const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
+  const normalized = normalizeBodyForSigning(req.body);
+  const candidates = [rawBody, normalized, ''];
+  return [...new Set(candidates)];
+}
+
+function verifyAgainstCandidates(secret, req, timestamp, bodyStrings, signature) {
+  for (const bodyString of bodyStrings) {
+    const payload = buildSignaturePayload(req, timestamp, bodyString);
+    if (verifySignature(secret, payload, signature)) {
+      return { matched: true, bodyString, payload };
+    }
+  }
+  return { matched: false, bodyString: null, payload: null };
+}
+
 function parseTimestamp(rawValue) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed)) return null;
   return parsed;
+}
+
+/** Отладочный лог расхождения подписи (включается env HMAC_DEBUG=1). */
+function logSignatureMismatch(req, row, timestamp, bodyStrings, signature, isMultipart) {
+  const provided = String(signature || '').trim().toLowerCase();
+  const rawBodyLen = typeof req.rawBody === 'string' ? req.rawBody.length : -1;
+  const expectedByCandidate = bodyStrings.map((bodyString, index) => {
+    const payload = buildSignaturePayload(req, timestamp, bodyString);
+    return {
+      index,
+      bodyPreview: bodyString.slice(0, 120),
+      expected: computeSignature(row.secret, payload).slice(0, 16),
+    };
+  });
+  console.warn(
+    '[hmac][MISMATCH]',
+    JSON.stringify({
+      method: req.method,
+      path: String(req.originalUrl || req.url || '').split('?')[0],
+      contentType: req.headers['content-type'] || null,
+      isMultipart,
+      rawBodyLen,
+      deviceUserId: row.user_id,
+      reqUserId: req.user ? req.user.id : null,
+      appVersion: row.app_version || null,
+      platform: row.platform || null,
+      timestamp,
+      providedPrefix: provided.slice(0, 16),
+      candidates: expectedByCandidate,
+    })
+  );
 }
 
 function hmacMiddleware(req, res, next) {
@@ -74,7 +134,7 @@ function hmacMiddleware(req, res, next) {
 
   const row = db
     .prepare(
-      `SELECT id, user_id, secret, blocked, block_reason
+      `SELECT id, user_id, secret, blocked, block_reason, app_version, platform
        FROM device_secrets
        WHERE device_id = ?`
     )
@@ -116,13 +176,13 @@ function hmacMiddleware(req, res, next) {
 
   const signature = req.headers[SIGNATURE_HEADER];
   const isMultipart = String(req.headers['content-type'] || '').includes('multipart/form-data');
-  const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
-  const bodyString = isMultipart
-    ? ''
-    : rawBody || normalizeBodyForSigning(req.body);
-  const payload = buildSignaturePayload(req, timestamp, bodyString);
+  const bodyStrings = buildBodyStringCandidates(req, isMultipart);
+  const { matched } = verifyAgainstCandidates(row.secret, req, timestamp, bodyStrings, signature);
 
-  if (!verifySignature(row.secret, payload, signature)) {
+  if (!matched) {
+    if (process.env.HMAC_DEBUG === '1') {
+      logSignatureMismatch(req, row, timestamp, bodyStrings, signature, isMultipart);
+    }
     return res.status(403).json({ error: 'Неверная подпись запроса', code: 'HMAC_INVALID' });
   }
 
