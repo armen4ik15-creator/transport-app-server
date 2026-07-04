@@ -52,4 +52,51 @@ router.get('/', (_req, res) => {
   return res.json(payload);
 });
 
+/**
+ * Временная диагностика привязок устройств для отладки HMAC.
+ * Доступна только при HMAC_DEBUG=1 и совпадении ?key= с HMAC_DEBUG_KEY.
+ * Секреты не раскрываются (только длина). Удалить после диагностики.
+ */
+router.get('/hmac-devices', (req, res) => {
+  const enabled = process.env.HMAC_DEBUG === '1' && Boolean(process.env.HMAC_DEBUG_KEY);
+  if (!enabled || String(req.query.key || '') !== String(process.env.HMAC_DEBUG_KEY)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const email = req.query.email ? String(req.query.email).toLowerCase() : null;
+  try {
+    const rows = db
+      .prepare(
+        `SELECT ds.id, ds.device_id, ds.user_id, u.email, u.role,
+                ds.blocked, ds.block_reason, ds.app_version, ds.platform,
+                length(ds.secret) AS secret_len, ds.created_at, ds.last_seen_at
+         FROM device_secrets ds
+         LEFT JOIN users u ON u.id = ds.user_id
+         ${email ? 'WHERE LOWER(u.email) = ?' : ''}
+         ORDER BY ds.last_seen_at DESC NULLS LAST, ds.id DESC
+         LIMIT 100`
+      )
+      .all(...(email ? [email] : []));
+    return res.json({
+      count: rows.length,
+      devices: rows.map((r) => ({
+        id: r.id,
+        device_id: r.device_id,
+        user_id: r.user_id,
+        email: r.email,
+        role: r.role,
+        blocked: r.blocked,
+        block_reason: r.block_reason,
+        app_version: r.app_version,
+        platform: r.platform,
+        secret_len: r.secret_len,
+        created_at: r.created_at,
+        last_seen_at: r.last_seen_at,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
