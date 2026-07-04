@@ -91,6 +91,20 @@ function parseTimestamp(rawValue) {
   return parsed;
 }
 
+/** Кольцевой буфер последних HMAC-решений (только при HMAC_DEBUG=1). */
+const recentHmacEvents = [];
+const MAX_HMAC_EVENTS = 80;
+
+function recordHmacEvent(evt) {
+  if (process.env.HMAC_DEBUG !== '1') return;
+  recentHmacEvents.push({ at: new Date().toISOString(), ...evt });
+  if (recentHmacEvents.length > MAX_HMAC_EVENTS) recentHmacEvents.shift();
+}
+
+function getRecentHmacEvents() {
+  return recentHmacEvents;
+}
+
 /** Отладочный лог расхождения подписи (включается env HMAC_DEBUG=1). */
 function logSignatureMismatch(req, row, timestamp, bodyStrings, signature, isMultipart) {
   const provided = String(signature || '').trim().toLowerCase();
@@ -123,12 +137,17 @@ function logSignatureMismatch(req, row, timestamp, bodyStrings, signature, isMul
 }
 
 function hmacMiddleware(req, res, next) {
+  const reqPath = String(req.originalUrl || req.url || '').split('?')[0];
+  const method = String(req.method || 'GET').toUpperCase();
+
   if (isExcludedPath(req.originalUrl || req.url)) {
     return next();
   }
 
   const deviceId = String(req.headers[DEVICE_ID_HEADER] || '').trim();
+  const hasSignature = Boolean(req.headers[SIGNATURE_HEADER]);
   if (!deviceId) {
+    recordHmacEvent({ outcome: 'no_device_id', method, path: reqPath, hasSignature, reqUserId: req.user ? req.user.id : null });
     return next();
   }
 
@@ -141,6 +160,7 @@ function hmacMiddleware(req, res, next) {
     .get(deviceId);
 
   if (!row) {
+    recordHmacEvent({ outcome: 'device_not_registered', method, path: reqPath, deviceId, hasSignature, reqUserId: req.user ? req.user.id : null });
     return res.status(403).json({
       error: 'Устройство не зарегистрировано',
       blocked: true,
@@ -149,6 +169,7 @@ function hmacMiddleware(req, res, next) {
   }
 
   if (Number(row.blocked) === 1) {
+    recordHmacEvent({ outcome: 'device_blocked', method, path: reqPath, deviceId, deviceUserId: row.user_id, reqUserId: req.user ? req.user.id : null });
     return res.status(403).json({
       error: row.block_reason || 'Доступ с этого устройства заблокирован',
       blocked: true,
@@ -157,6 +178,7 @@ function hmacMiddleware(req, res, next) {
   }
 
   if (req.user && Number(row.user_id) !== Number(req.user.id)) {
+    recordHmacEvent({ outcome: 'user_mismatch', method, path: reqPath, deviceId, deviceUserId: row.user_id, reqUserId: req.user.id, appVersion: row.app_version });
     return res.status(403).json({
       error: 'Устройство привязано к другому пользователю',
       blocked: true,
@@ -166,11 +188,13 @@ function hmacMiddleware(req, res, next) {
 
   const timestamp = parseTimestamp(req.headers[TIMESTAMP_HEADER]);
   if (timestamp == null) {
+    recordHmacEvent({ outcome: 'timestamp_missing', method, path: reqPath, deviceId, deviceUserId: row.user_id, hasSignature });
     return res.status(403).json({ error: 'Отсутствует метка времени запроса', code: 'HMAC_TIMESTAMP' });
   }
 
   const skew = Math.abs(Date.now() - timestamp);
   if (skew > MAX_TIMESTAMP_SKEW_MS) {
+    recordHmacEvent({ outcome: 'timestamp_skew', method, path: reqPath, deviceId, deviceUserId: row.user_id, skewMs: skew });
     return res.status(403).json({ error: 'Метка времени запроса недействительна', code: 'HMAC_TIMESTAMP' });
   }
 
@@ -180,11 +204,27 @@ function hmacMiddleware(req, res, next) {
   const { matched } = verifyAgainstCandidates(row.secret, req, timestamp, bodyStrings, signature);
 
   if (!matched) {
+    recordHmacEvent({
+      outcome: 'invalid_signature',
+      method,
+      path: reqPath,
+      deviceId,
+      deviceUserId: row.user_id,
+      reqUserId: req.user ? req.user.id : null,
+      isMultipart,
+      contentType: req.headers['content-type'] || null,
+      rawBodyLen: typeof req.rawBody === 'string' ? req.rawBody.length : -1,
+      candidateCount: bodyStrings.length,
+      appVersion: row.app_version,
+      hasSignature,
+    });
     if (process.env.HMAC_DEBUG === '1') {
       logSignatureMismatch(req, row, timestamp, bodyStrings, signature, isMultipart);
     }
     return res.status(403).json({ error: 'Неверная подпись запроса', code: 'HMAC_INVALID' });
   }
+
+  recordHmacEvent({ outcome: 'ok', method, path: reqPath, deviceId, deviceUserId: row.user_id, isMultipart });
 
   req.device = {
     id: deviceId,
@@ -195,4 +235,10 @@ function hmacMiddleware(req, res, next) {
   return next();
 }
 
-module.exports = { hmacMiddleware, isExcludedPath, buildSignaturePayload, verifySignature };
+module.exports = {
+  hmacMiddleware,
+  isExcludedPath,
+  buildSignaturePayload,
+  verifySignature,
+  getRecentHmacEvents,
+};

@@ -99,4 +99,15 @@ router.get('/hmac-devices', (req, res) => {
   }
 });
 
+/** Последние решения HMAC-middleware (только при HMAC_DEBUG=1 + ключ). Удалить после диагностики. */
+router.get('/hmac-events', (req, res) => {
+  const enabled = process.env.HMAC_DEBUG === '1' && Boolean(process.env.HMAC_DEBUG_KEY);
+  if (!enabled || String(req.query.key || '') !== String(process.env.HMAC_DEBUG_KEY)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const { getRecentHmacEvents } = require('../middleware/hmac');
+  const events = getRecentHmacEvents();
+  return res.json({ count: events.length, events });
+});
+
 module.exports = router;
