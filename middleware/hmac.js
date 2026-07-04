@@ -69,10 +69,10 @@ function verifySignature(secret, payload, signature) {
  */
 function buildBodyStringCandidates(req, isMultipart) {
   if (isMultipart) {
-    // Сервер не может восстановить multipart-тело на этапе HMAC (multer парсит форму позже).
-    // Разные версии клиентского бандла подписывали "тело" по-разному:
-    // '' (актуально), JSON.stringify(FormData)='{}', String(formData)='[object FormData]' и т.п.
-    return ['', '{}', 'null', 'undefined', '[object Object]', '[object FormData]'];
+    // Актуальный клиент подписывает multipart пустым телом.
+    // Старые бандлы (<=487d633) подписывали JSON.stringify(FormData) с локальным file://-URI фото,
+    // который сервер не видит и воспроизвести не может — такие подписи чинятся только обновлением клиента.
+    return [''];
   }
   const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
   const normalized = normalizeBodyForSigning(req.body);
