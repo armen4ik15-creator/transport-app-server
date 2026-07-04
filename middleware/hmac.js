@@ -68,7 +68,12 @@ function verifySignature(secret, payload, signature) {
  * это устраняет рассинхрон версий, не ослабляя защиту (секрет по-прежнему обязателен).
  */
 function buildBodyStringCandidates(req, isMultipart) {
-  if (isMultipart) return [''];
+  if (isMultipart) {
+    // Сервер не может восстановить multipart-тело на этапе HMAC (multer парсит форму позже).
+    // Разные версии клиентского бандла подписывали "тело" по-разному:
+    // '' (актуально), JSON.stringify(FormData)='{}', String(formData)='[object FormData]' и т.п.
+    return ['', '{}', 'null', 'undefined', '[object Object]', '[object FormData]'];
+  }
   const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
   const normalized = normalizeBodyForSigning(req.body);
   const candidates = [rawBody, normalized, ''];
@@ -201,7 +206,13 @@ function hmacMiddleware(req, res, next) {
   const signature = req.headers[SIGNATURE_HEADER];
   const isMultipart = String(req.headers['content-type'] || '').includes('multipart/form-data');
   const bodyStrings = buildBodyStringCandidates(req, isMultipart);
-  const { matched } = verifyAgainstCandidates(row.secret, req, timestamp, bodyStrings, signature);
+  const { matched, bodyString: matchedBody } = verifyAgainstCandidates(
+    row.secret,
+    req,
+    timestamp,
+    bodyStrings,
+    signature
+  );
 
   if (!matched) {
     recordHmacEvent({
@@ -224,7 +235,15 @@ function hmacMiddleware(req, res, next) {
     return res.status(403).json({ error: 'Неверная подпись запроса', code: 'HMAC_INVALID' });
   }
 
-  recordHmacEvent({ outcome: 'ok', method, path: reqPath, deviceId, deviceUserId: row.user_id, isMultipart });
+  recordHmacEvent({
+    outcome: 'ok',
+    method,
+    path: reqPath,
+    deviceId,
+    deviceUserId: row.user_id,
+    isMultipart,
+    matchedBody: JSON.stringify(matchedBody),
+  });
 
   req.device = {
     id: deviceId,
