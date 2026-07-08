@@ -8,6 +8,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "backup": "node scripts/backup-full.js",
+    "backup:full": "node scripts/fullBackup.js",
+    "restore": "node scripts/restore-full.js",
     "setup-founder": "node scripts/setup-founder.js",
     "timeweb-deploy": "node scripts/timeweb-deploy.js",
     "timeweb-fix-db": "node scripts/timeweb-fix-db.js"
@@ -29,6 +31,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "node-cron": "^4.6.0",
     "pg": "^8.13.1"
   }
 }

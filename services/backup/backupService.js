@@ -17,19 +17,39 @@ function safeRemoveDir(dir) {
   }
 }
 
-function pruneLocalBackups(backupDir, keepCount) {
+function pruneLocalBackups(backupDir, keepCount, keepDays = 7) {
   if (!fs.existsSync(backupDir)) return;
+
+  const now = Date.now();
+  const maxAgeMs = keepDays * 24 * 60 * 60 * 1000;
+
   const files = fs
     .readdirSync(backupDir)
     .filter((name) => name.startsWith('reestrpro-backup-') && name.endsWith('.zip'))
-    .map((name) => ({
-      name,
-      mtime: fs.statSync(path.join(backupDir, name)).mtimeMs,
-    }))
+    .map((name) => {
+      const filePath = path.join(backupDir, name);
+      const stat = fs.statSync(filePath);
+      return {
+        name,
+        mtime: stat.mtimeMs,
+        ageMs: now - stat.mtimeMs,
+      };
+    })
     .sort((a, b) => b.mtime - a.mtime);
 
-  files.slice(keepCount).forEach(({ name }) => {
+  const toDelete = new Set();
+
+  files.slice(keepCount).forEach(({ name }) => toDelete.add(name));
+  files.forEach(({ name, ageMs }) => {
+    if (ageMs > maxAgeMs) toDelete.add(name);
+  });
+
+  toDelete.forEach((name) => {
     fs.unlinkSync(path.join(backupDir, name));
+    const manifestPath = path.join(backupDir, `${name}.manifest.json`);
+    if (fs.existsSync(manifestPath)) {
+      fs.unlinkSync(manifestPath);
+    }
   });
 }
 
@@ -127,7 +147,7 @@ async function runFullBackup({ trigger = 'manual', userId = null, uploadRemote =
       remote = await uploadBackupRemote(config, backupMeta);
     }
 
-    pruneLocalBackups(config.backupDir, config.keepLocalCount);
+    pruneLocalBackups(config.backupDir, config.keepLocalCount, config.keepLocalDays);
 
     const result = {
       ok: true,

@@ -20,9 +20,27 @@
 
 > **Важно:** в `docker-compose.yml` смонтирован volume `app-data:/data` — без него uploads и локальные бэкапы теряются при redeploy контейнера.
 
-## Настройка (Timeweb)
+## Настройка (Timeweb App Platform)
 
-### 1. S3-хранилище Timeweb
+### 0. Постоянный диск `/data` (обязательно)
+
+Без volume при каждом redeploy теряются:
+
+- `uploads/` — все фото ТТН, расходов, документов
+- `backups/` — локальные ZIP-архивы
+
+**В панели Timeweb → приложение ReestrPro Backend:**
+
+1. Раздел **Volumes** → создать volume (минимум 5–10 GB)
+2. Смонтировать в контейнер по пути **`/data`**
+3. В переменных окружения: `DATA_DIR=/data`
+4. Пересобрать приложение
+
+Проверка после деплоя: `GET /api/health` → `storage.data_dir_writable: true`, `storage.uploads_file_count > 0` после загрузки фото.
+
+Для Docker Compose на VPS в репозитории уже есть `volumes: app-data:/data`.
+
+### 1. S3-хранилище Timeweb (off-site, обязательно для production)
 
 1. Создайте бакет в панели Timeweb → S3
 2. Добавьте переменные в деплой:
@@ -67,17 +85,32 @@ node scripts/backup-full.js
 
 ## Восстановление
 
-1. Скачайте ZIP через приложение или S3
-2. Распакуйте
-3. Для SQLite: замените `database.sqlite`
-4. Для PostgreSQL: `psql < database/database.sql`
-5. Скопируйте `uploads/` в `DATA_DIR/uploads/` на сервере
+1. Скачайте ZIP через приложение (**Ещё → Резервные копии**) или из S3
+2. На сервере (контейнер остановлен или в maintenance):
+
+```bash
+node scripts/restore-full.js /path/to/reestrpro-backup-....zip
+```
+
+3. Скрипт распакует `uploads/` в `DATA_DIR/uploads/` и восстановит SQLite (или `database.sql` для PostgreSQL через `psql`)
+4. Перезапустите приложение
+
+Ручной вариант:
+
+1. Распакуйте ZIP
+2. Для PostgreSQL: `psql $DATABASE_URL -f database/database.sql`
+3. Скопируйте `uploads/` в `DATA_DIR/uploads/` на сервере
 
 > Полное восстановление на production — только администратором. Перед restore остановите приложение.
 
-## Рекомендации
+## Что уже входит в бэкап (полная база)
 
-- **S3 обязателен** для production — локальные копии на том же сервере не спасут при поломке диска
-- Настройте lifecycle policy на бакете: хранить 90 дней
-- Раз в месяц скачивайте архив на компьютер через приложение
-- Excel-экспорты (реестр, финансы) — дополнительная точечная выгрузка, не замена полному бэкапу
+| Данные | Где в архиве |
+|--------|----------------|
+| Заказы, рейсы, ТТН | `database/` (SQL или JSON) |
+| Расходы, финансы, зарплаты | `database/` |
+| Путевые листы, счета, документы | `database/` + `uploads/` |
+| Фото ТТН, чеки расходов | `uploads/trips/`, `uploads/expenses/` |
+| Журнал действий, справочники | `database/` |
+
+Excel-экспорты из приложения — дополнительная точечная выгрузка, не замена полному ZIP.

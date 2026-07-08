@@ -3,6 +3,7 @@ const fs = require('fs');
 const db = require('../database');
 const { DB_PATH, DATA_DIR } = require('../config/paths');
 const { buildConnectionString, getPostgresEnvDiagnostics } = require('../database/connection');
+const { getStorageHealth } = require('../utils/storageHealth');
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.get('/', (_req, res) => {
     app_version: process.env.APP_VERSION || '1.2.1',
     db_kind: db.kind || 'sqlite',
     data_dir: DATA_DIR,
+    storage: getStorageHealth(),
     env,
   };
 

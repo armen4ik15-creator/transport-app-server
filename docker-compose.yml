@@ -41,3 +41,8 @@ services:
       BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
       BACKUP_TELEGRAM_BOT_TOKEN: ${BACKUP_TELEGRAM_BOT_TOKEN:-}
       BACKUP_TELEGRAM_CHAT_ID: ${BACKUP_TELEGRAM_CHAT_ID:-}
+    volumes:
+      - app-data:/data
+
+volumes:
+  app-data:

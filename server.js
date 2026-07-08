@@ -4,8 +4,10 @@ const express = require('express');
 const compression = require('compression');
 const cors = require('cors');
 const { UPLOADS_DIR, ensureDataStorage } = require('./config/paths');
+const { ensureStorageDirectories } = require('./config/storage');
 
 ensureDataStorage();
+ensureStorageDirectories();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -124,6 +126,7 @@ function mountRoutes() {
   app.use('/api/earnings', earningsRoutes);
   app.use('/api/salary', salaryRoutes);
   app.use('/api/backups', backupsRoutes);
+  app.use('/api/admin/backups', backupsRoutes);
   app.use('/api/admin', adminPurgeRoutes);
   app.use('/api/admin', killSwitchRoutes);
   app.use('/api/dashboard', dashboardRoutes);

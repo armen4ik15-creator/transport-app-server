@@ -5,6 +5,7 @@ const multer = require('multer');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
+const { isUploadFileAvailable } = require('../utils/uploadPaths');
 
 const router = express.Router();
 
@@ -152,6 +153,13 @@ function deleteTripPhotoFiles(trip) {
   }
 }
 
+function enrichTripRow(row) {
+  if (!row) return row;
+  const photoPath = row.photo_path ? String(row.photo_path).trim() : '';
+  const photoAvailable = photoPath ? isUploadFileAvailable(photoPath) : false;
+  return { ...row, photo_available: photoAvailable };
+}
+
 router.get('/', (req, res) => {
   const orderId = req.query.order_id ? Number(req.query.order_id) : null;
   let driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
@@ -197,7 +205,7 @@ router.get('/', (req, res) => {
     )
     .all(...params, limit);
 
-  return res.json(rows);
+  return res.json(rows.map(enrichTripRow));
 });
 
 router.get('/summary', (req, res) => {
@@ -375,7 +383,7 @@ router.post('/', (req, res, next) => {
   ).run(trimmedTtn, parsedVolume, trimmedNote, filePath, activeTrip.id);
 
   const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(activeTrip.id);
-  return res.json(trip);
+  return res.json(enrichTripRow(trip));
 });
 
 router.post('/:id/photo', (req, res, next) => {
@@ -427,7 +435,7 @@ router.post('/:id/photo', (req, res, next) => {
   db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
-  return res.json(updatedTrip);
+  return res.json(enrichTripRow(updatedTrip));
 });
 
 router.delete('/:id', (req, res) => {

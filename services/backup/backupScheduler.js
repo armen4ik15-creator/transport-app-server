@@ -2,27 +2,52 @@ const { getBackupConfig } = require('./backupConfig');
 const { runFullBackup, isBackupRunning } = require('./backupService');
 const db = require('../../database');
 
-let timer = null;
+let intervalTimer = null;
+let cronTask = null;
 
-async function tick() {
+async function tick(trigger = 'scheduled') {
   if (isBackupRunning()) return;
   try {
-    await runFullBackup({ trigger: 'scheduled', userId: null, uploadRemote: true });
-    console.log('[backup] scheduled backup completed');
+    await runFullBackup({ trigger, userId: null, uploadRemote: true });
+    console.log(`[backup] ${trigger} backup completed`);
   } catch (error) {
-    console.error('[backup] scheduled backup failed:', error.message);
+    console.error(`[backup] ${trigger} backup failed:`, error.message);
   }
 }
 
-function scheduleNext() {
-  if (timer) clearInterval(timer);
+function scheduleInterval() {
+  if (intervalTimer) clearInterval(intervalTimer);
   const config = getBackupConfig();
   if (!config.enabled) return;
 
   const ms = Math.max(1, config.intervalHours) * 60 * 60 * 1000;
-  timer = setInterval(() => {
-    void tick();
+  intervalTimer = setInterval(() => {
+    void tick('interval');
   }, ms);
+}
+
+function scheduleCron() {
+  if (cronTask) {
+    cronTask.stop();
+    cronTask = null;
+  }
+
+  const config = getBackupConfig();
+  if (!config.enabled) return;
+
+  try {
+    const cron = require('node-cron');
+    if (!cron.validate(config.cronSchedule)) {
+      console.warn(`[backup] invalid cron schedule: ${config.cronSchedule}`);
+      return;
+    }
+    cronTask = cron.schedule(config.cronSchedule, () => {
+      void tick('cron');
+    });
+    console.log(`[backup] cron scheduler started (${config.cronSchedule})`);
+  } catch (error) {
+    console.warn('[backup] node-cron unavailable:', error.message);
+  }
 }
 
 function startBackupScheduler() {
@@ -35,12 +60,14 @@ function startBackupScheduler() {
     console.log('[backup] scheduler disabled');
     return;
   }
-  scheduleNext();
-  console.log(`[backup] scheduler started (every ${config.intervalHours}h)`);
+  scheduleInterval();
+  scheduleCron();
+  console.log(`[backup] interval scheduler started (every ${config.intervalHours}h)`);
 }
 
 function restartBackupScheduler() {
-  scheduleNext();
+  scheduleInterval();
+  scheduleCron();
 }
 
 module.exports = { startBackupScheduler, restartBackupScheduler, runBackupNow: tick };

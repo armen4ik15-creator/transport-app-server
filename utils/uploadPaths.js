@@ -43,7 +43,14 @@ function resolveUploadAbsolutePath(webPath) {
   return null;
 }
 
+function isUploadFileAvailable(webPath) {
+  const normalized = normalizeUploadWebPath(webPath);
+  if (!normalized) return false;
+  return Boolean(resolveUploadAbsolutePath(normalized));
+}
+
 module.exports = {
   normalizeUploadWebPath,
   resolveUploadAbsolutePath,
+  isUploadFileAvailable,
 };

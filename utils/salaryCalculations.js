@@ -1,9 +1,18 @@
 const COMPLETED_TRIP_SQL =
   "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
 
-/** Рейс учитывается в зарплате только при наличии фото ТТН. */
+/** Рейс учитывается в зарплате только при наличии фото ТТН в БД. */
 const SALARY_ELIGIBLE_TRIP_SQL =
   "(t.photo_path IS NOT NULL AND TRIM(t.photo_path) != '')";
+
+const { isUploadFileAvailable } = require('./uploadPaths');
+
+function isTripSalaryEligible(trip) {
+  if (!trip) return false;
+  const photoPath = trip.photo_path ? String(trip.photo_path).trim() : '';
+  if (!photoPath) return false;
+  return isUploadFileAvailable(photoPath);
+}
 
 function asNumber(value) {
   const num = Number(value);
@@ -13,7 +22,7 @@ function asNumber(value) {
 function calcDriverTripAccrued(db, driverId, dateFrom, dateTo) {
   if (!driverId || !dateFrom || !dateTo) return 0;
 
-  const where = [COMPLETED_TRIP_SQL, SALARY_ELIGIBLE_TRIP_SQL, 't.driver_id = ?'];
+  const where = [COMPLETED_TRIP_SQL, 't.driver_id = ?'];
   const params = [driverId];
 
   where.push('date(COALESCE(t.completed_at, t.created_at)) >= date(?)');
@@ -21,16 +30,19 @@ function calcDriverTripAccrued(db, driverId, dateFrom, dateTo) {
   where.push('date(COALESCE(t.completed_at, t.created_at)) <= date(?)');
   params.push(dateTo);
 
-  const row = db
+  const rows = db
     .prepare(
-      `SELECT COALESCE(SUM(COALESCE(o.driver_rate, 0)), 0) AS accrued
+      `SELECT t.photo_path, COALESCE(o.driver_rate, 0) AS driver_rate
        FROM trips t
        JOIN orders o ON o.id = t.order_id
        WHERE ${where.join(' AND ')}`
     )
-    .get(...params);
+    .all(...params);
 
-  return asNumber(row?.accrued);
+  return rows.reduce(
+    (sum, row) => sum + (isTripSalaryEligible(row) ? asNumber(row.driver_rate) : 0),
+    0
+  );
 }
 
 function calcDriverDeductions(db, driverId, dateFrom, dateTo) {
@@ -179,6 +191,7 @@ function monthKeyFromIso(isoDate) {
 module.exports = {
   COMPLETED_TRIP_SQL,
   SALARY_ELIGIBLE_TRIP_SQL,
+  isTripSalaryEligible,
   asNumber,
   calcDriverTripAccrued,
   calcDriverCompensations,

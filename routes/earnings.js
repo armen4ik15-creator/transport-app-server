@@ -4,8 +4,9 @@ const { authMiddleware } = require('../middleware/auth');
 const {
   calcDriverCompensations,
   COMPLETED_TRIP_SQL,
-  SALARY_ELIGIBLE_TRIP_SQL,
+  isTripSalaryEligible,
 } = require('../utils/salaryCalculations');
+const { isUploadFileAvailable } = require('../utils/uploadPaths');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -113,10 +114,7 @@ router.get('/summary', (req, res) => {
     .prepare(
       `SELECT
          COUNT(*) AS total_trips,
-         COALESCE(SUM(CASE WHEN ${SALARY_ELIGIBLE_TRIP_SQL} THEN 1 ELSE 0 END), 0) AS eligible_trips,
-         COALESCE(SUM(CASE WHEN NOT (${SALARY_ELIGIBLE_TRIP_SQL}) THEN 1 ELSE 0 END), 0) AS ineligible_trips,
-         COALESCE(SUM(t.volume), 0) AS total_volume,
-         COALESCE(SUM(CASE WHEN ${SALARY_ELIGIBLE_TRIP_SQL} THEN COALESCE(o.driver_rate, 0) ELSE 0 END), 0) AS estimated_income
+         COALESCE(SUM(t.volume), 0) AS total_volume
        FROM trips t
        JOIN orders o ON o.id = t.order_id
        ${tripWhere.length ? `WHERE ${tripWhere.join(' AND ')}` : ''}`
@@ -166,12 +164,10 @@ router.get('/summary', (req, res) => {
     )
     .get(...financeParams);
 
-  const estimatedIncome = Number(tripStats.estimated_income || 0);
   const expenseStats = buildExpenseStats(driverId, from, to);
-  const totalEarnings = estimatedIncome + expenseStats.compensations;
 
   const trips = tripRows.map((row) => {
-    const hasPhotos = Boolean(row.photo_path && String(row.photo_path).trim());
+    const countedInSalary = isTripSalaryEligible(row);
     return {
       id: Number(row.id),
       order_id: Number(row.order_id),
@@ -180,15 +176,24 @@ router.get('/summary', (req, res) => {
       created_at: row.created_at,
       completed_at: row.completed_at ?? null,
       driver_rate: Number(row.driver_rate || 0),
-      has_photos: hasPhotos,
-      counted_in_salary: hasPhotos,
+      has_photos: countedInSalary,
+      counted_in_salary: countedInSalary,
+      photo_available: row.photo_path ? isUploadFileAvailable(row.photo_path) : false,
     };
   });
 
+  const eligibleTrips = trips.filter((trip) => trip.counted_in_salary).length;
+  const ineligibleTrips = trips.length - eligibleTrips;
+  const estimatedIncome = trips.reduce(
+    (sum, trip) => sum + (trip.counted_in_salary ? trip.driver_rate : 0),
+    0
+  );
+  const totalEarnings = estimatedIncome + expenseStats.compensations;
+
   return res.json({
     total_trips: Number(tripStats.total_trips || 0),
-    eligible_trips: Number(tripStats.eligible_trips || 0),
-    ineligible_trips: Number(tripStats.ineligible_trips || 0),
+    eligible_trips: eligibleTrips,
+    ineligible_trips: ineligibleTrips,
     total_volume: Number(tripStats.total_volume || 0),
     estimated_income: estimatedIncome,
     actual_income: Number(financeStats.actual_income || 0),

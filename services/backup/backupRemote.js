@@ -1,30 +1,22 @@
 const fs = require('fs');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { createS3Client, uploadFileToS3 } = require('../../config/s3');
 
 async function uploadToS3(config, filePath, objectKey) {
   if (!config.s3.enabled) {
     return { uploaded: false, reason: 's3_not_configured' };
   }
 
-  const client = new S3Client({
-    region: config.s3.region,
-    endpoint: config.s3.endpoint || undefined,
-    forcePathStyle: Boolean(config.s3.endpoint),
-    credentials: {
-      accessKeyId: config.s3.accessKey,
-      secretAccessKey: config.s3.secretKey,
-    },
-  });
+  const client = createS3Client(config.s3);
+  if (!client) {
+    return { uploaded: false, reason: 's3_not_configured' };
+  }
 
-  const body = fs.createReadStream(filePath);
-  await client.send(
-    new PutObjectCommand({
-      Bucket: config.s3.bucket,
-      Key: objectKey,
-      Body: body,
-      ContentType: 'application/zip',
-    })
-  );
+  await uploadFileToS3({
+    client,
+    bucket: config.s3.bucket,
+    key: objectKey,
+    filePath,
+  });
 
   return { uploaded: true, bucket: config.s3.bucket, key: objectKey };
 }
