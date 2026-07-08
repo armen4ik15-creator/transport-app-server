@@ -1,7 +1,11 @@
 const express = require('express');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
-const { calcDriverCompensations } = require('../utils/salaryCalculations');
+const {
+  calcDriverCompensations,
+  COMPLETED_TRIP_SQL,
+  SALARY_ELIGIBLE_TRIP_SQL,
+} = require('../utils/salaryCalculations');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -56,6 +60,26 @@ function buildExpenseStats(driverId, from, to) {
   };
 }
 
+function buildTripFilters(driverId, from, to) {
+  const where = [COMPLETED_TRIP_SQL];
+  const params = [];
+
+  if (driverId) {
+    where.push('t.driver_id = ?');
+    params.push(driverId);
+  }
+  if (from) {
+    where.push('date(COALESCE(t.completed_at, t.created_at)) >= date(?)');
+    params.push(from);
+  }
+  if (to) {
+    where.push('date(COALESCE(t.completed_at, t.created_at)) <= date(?)');
+    params.push(to);
+  }
+
+  return { where, params };
+}
+
 router.get('/summary', (req, res) => {
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
@@ -66,6 +90,8 @@ router.get('/summary', (req, res) => {
     if (!driverId) {
       return res.json({
         total_trips: 0,
+        eligible_trips: 0,
+        ineligible_trips: 0,
         total_volume: 0,
         estimated_income: 0,
         actual_income: 0,
@@ -76,36 +102,44 @@ router.get('/summary', (req, res) => {
         expenses_rejected: 0,
         compensations: 0,
         total_earnings: 0,
+        trips: [],
       });
     }
   }
 
-  const tripWhere = ["(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))"];
-  const tripParams = [];
-  if (driverId) {
-    tripWhere.push('t.driver_id = ?');
-    tripParams.push(driverId);
-  }
-  if (from) {
-    tripWhere.push('date(COALESCE(t.completed_at, t.created_at)) >= date(?)');
-    tripParams.push(from);
-  }
-  if (to) {
-    tripWhere.push('date(COALESCE(t.completed_at, t.created_at)) <= date(?)');
-    tripParams.push(to);
-  }
+  const { where: tripWhere, params: tripParams } = buildTripFilters(driverId, from, to);
 
   const tripStats = db
     .prepare(
       `SELECT
          COUNT(*) AS total_trips,
+         COALESCE(SUM(CASE WHEN ${SALARY_ELIGIBLE_TRIP_SQL} THEN 1 ELSE 0 END), 0) AS eligible_trips,
+         COALESCE(SUM(CASE WHEN NOT (${SALARY_ELIGIBLE_TRIP_SQL}) THEN 1 ELSE 0 END), 0) AS ineligible_trips,
          COALESCE(SUM(t.volume), 0) AS total_volume,
-         COALESCE(SUM(COALESCE(o.driver_rate, 0)), 0) AS estimated_income
+         COALESCE(SUM(CASE WHEN ${SALARY_ELIGIBLE_TRIP_SQL} THEN COALESCE(o.driver_rate, 0) ELSE 0 END), 0) AS estimated_income
        FROM trips t
        JOIN orders o ON o.id = t.order_id
        ${tripWhere.length ? `WHERE ${tripWhere.join(' AND ')}` : ''}`
     )
     .get(...tripParams);
+
+  const tripRows = db
+    .prepare(
+      `SELECT
+         t.id,
+         t.order_id,
+         t.ttn_number,
+         t.volume,
+         t.photo_path,
+         t.created_at,
+         t.completed_at,
+         COALESCE(o.driver_rate, 0) AS driver_rate
+       FROM trips t
+       JOIN orders o ON o.id = t.order_id
+       ${tripWhere.length ? `WHERE ${tripWhere.join(' AND ')}` : ''}
+       ORDER BY COALESCE(t.completed_at, t.created_at) DESC, t.id DESC`
+    )
+    .all(...tripParams);
 
   const financeWhere = [];
   const financeParams = [];
@@ -136,8 +170,25 @@ router.get('/summary', (req, res) => {
   const expenseStats = buildExpenseStats(driverId, from, to);
   const totalEarnings = estimatedIncome + expenseStats.compensations;
 
+  const trips = tripRows.map((row) => {
+    const hasPhotos = Boolean(row.photo_path && String(row.photo_path).trim());
+    return {
+      id: Number(row.id),
+      order_id: Number(row.order_id),
+      ttn_number: row.ttn_number ?? null,
+      volume: row.volume == null ? null : Number(row.volume),
+      created_at: row.created_at,
+      completed_at: row.completed_at ?? null,
+      driver_rate: Number(row.driver_rate || 0),
+      has_photos: hasPhotos,
+      counted_in_salary: hasPhotos,
+    };
+  });
+
   return res.json({
     total_trips: Number(tripStats.total_trips || 0),
+    eligible_trips: Number(tripStats.eligible_trips || 0),
+    ineligible_trips: Number(tripStats.ineligible_trips || 0),
     total_volume: Number(tripStats.total_volume || 0),
     estimated_income: estimatedIncome,
     actual_income: Number(financeStats.actual_income || 0),
@@ -148,6 +199,7 @@ router.get('/summary', (req, res) => {
     expenses_rejected: expenseStats.expenses_rejected,
     compensations: expenseStats.compensations,
     total_earnings: totalEarnings,
+    trips,
   });
 });
 

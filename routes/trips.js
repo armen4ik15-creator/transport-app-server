@@ -123,6 +123,29 @@ function isTripLoading(trip) {
   return trip.status === 'loading' || (trip.status == null && trip.stage === 'loading');
 }
 
+function findDuplicateTtn(ttnNumber, excludeTripId = null) {
+  const normalized = ttnNumber ? String(ttnNumber).trim() : '';
+  if (!normalized) return null;
+
+  const params = [normalized];
+  let excludeSql = '';
+  if (excludeTripId != null) {
+    excludeSql = ' AND id != ?';
+    params.push(excludeTripId);
+  }
+
+  return db
+    .prepare(
+      `SELECT id FROM trips
+       WHERE ttn_number IS NOT NULL
+         AND TRIM(ttn_number) != ''
+         AND ttn_number = ?
+         ${excludeSql}
+       LIMIT 1`
+    )
+    .get(...params);
+}
+
 function deleteTripPhotoFiles(trip) {
   if (trip.photo_path) {
     unlinkStoredUpload(trip.photo_path);
@@ -281,6 +304,14 @@ router.post('/', (req, res, next) => {
       return res.status(409).json({ error: 'Сначала завершите разгрузку текущего рейса' });
     }
 
+    if (trimmedTtn) {
+      const duplicate = findDuplicateTtn(trimmedTtn);
+      if (duplicate) {
+        cleanupUploadedFile(req.file);
+        return res.status(409).json({ error: 'Номер ТТН уже использован' });
+      }
+    }
+
     const result = db
       .prepare(
         `INSERT INTO trips
@@ -303,7 +334,7 @@ router.post('/', (req, res, next) => {
 
   const activeTrip = db
     .prepare(
-      `SELECT id, photo_path FROM trips
+      `SELECT id, photo_path, ttn_number FROM trips
        WHERE order_id = ? AND driver_id = ? AND status = 'loading'
        ORDER BY id DESC LIMIT 1`
     )
@@ -312,6 +343,15 @@ router.post('/', (req, res, next) => {
   if (!activeTrip) {
     cleanupUploadedFile(req.file);
     return res.status(400).json({ error: 'Сначала отметьте погрузку' });
+  }
+
+  const finalTtn = trimmedTtn || (activeTrip.ttn_number ? String(activeTrip.ttn_number).trim() : null);
+  if (finalTtn) {
+    const duplicate = findDuplicateTtn(finalTtn, activeTrip.id);
+    if (duplicate) {
+      cleanupUploadedFile(req.file);
+      return res.status(409).json({ error: 'Номер ТТН уже использован' });
+    }
   }
 
   if (activeTrip.photo_path && filePath) {
@@ -336,6 +376,58 @@ router.post('/', (req, res, next) => {
 
   const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(activeTrip.id);
   return res.json(trip);
+});
+
+router.post('/:id/photo', (req, res, next) => {
+  return upload.single('photo')(req, res, next);
+}, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    cleanupUploadedFile(req.file);
+    return res.status(400).json({ error: 'Некорректный id' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'Фото обязательно' });
+  }
+
+  const trip = db
+    .prepare('SELECT id, order_id, driver_id, status, stage, photo_path FROM trips WHERE id = ?')
+    .get(id);
+  if (!trip) {
+    cleanupUploadedFile(req.file);
+    return res.status(404).json({ error: 'Рейс не найден' });
+  }
+
+  const order = db.prepare('SELECT id, driver_id FROM orders WHERE id = ?').get(trip.order_id);
+  if (!order || !isAllowedForOrder(req, order)) {
+    cleanupUploadedFile(req.file);
+    return res.status(403).json({ error: 'Нет доступа к этому рейсу' });
+  }
+
+  if (req.user.role !== 'admin') {
+    const driverId = getDriverIdForUser(req.user.id);
+    if (!driverId || Number(trip.driver_id) !== driverId) {
+      cleanupUploadedFile(req.file);
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+  }
+
+  const isCompleted =
+    trip.status === 'completed' || (trip.status == null && trip.stage === 'unloading');
+  if (!isCompleted) {
+    cleanupUploadedFile(req.file);
+    return res.status(400).json({ error: 'Фото можно прикрепить только к завершённому рейсу' });
+  }
+
+  if (trip.photo_path) {
+    unlinkStoredUpload(trip.photo_path);
+  }
+
+  const filePath = `/uploads/trips/${req.file.filename}`;
+  db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
+
+  const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
+  return res.json(updatedTrip);
 });
 
 router.delete('/:id', (req, res) => {
