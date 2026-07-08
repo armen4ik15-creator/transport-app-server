@@ -16,6 +16,8 @@ const HMAC_EXCLUDED_PREFIXES = [
   '/api/auth/reset-device',
   '/api/device/register',
   '/api/heartbeat',
+  '/api/public',
+  '/downloads',
 ];
 
 function isExcludedPath(path) {

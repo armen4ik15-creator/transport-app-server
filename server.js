@@ -1,10 +1,13 @@
 require('dotenv').config();
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const compression = require('compression');
 const cors = require('cors');
 const { UPLOADS_DIR, ensureDataStorage } = require('./config/paths');
 const { ensureStorageDirectories } = require('./config/storage');
+const { APP_DOWNLOADS_DIR, APK_FILENAME } = require('./routes/publicApp');
 
 ensureDataStorage();
 ensureStorageDirectories();
@@ -42,6 +45,21 @@ app.use(
 );
 app.use(responseNoiseMiddleware);
 app.use('/uploads', express.static(UPLOADS_DIR));
+
+if (!fs.existsSync(APP_DOWNLOADS_DIR)) {
+  fs.mkdirSync(APP_DOWNLOADS_DIR, { recursive: true });
+}
+app.use(
+  '/downloads',
+  express.static(APP_DOWNLOADS_DIR, {
+    setHeaders: (res, filePath) => {
+      if (String(filePath).endsWith('.apk')) {
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+        res.setHeader('Content-Disposition', `attachment; filename="${APK_FILENAME}"`);
+      }
+    },
+  })
+);
 
 app.get('/api/health/live', (_req, res) => {
   res.json({
@@ -90,6 +108,7 @@ function mountRoutes() {
   const salaryRoutes = require('./routes/salary');
   const contractorPaymentsRoutes = require('./routes/contractorPayments');
   const backupsRoutes = require('./routes/backups');
+  const { router: publicAppRoutes } = require('./routes/publicApp');
   const dashboardRoutes = require('./routes/dashboard');
   const { router: adminRegistrationsRoutes } = require('./routes/adminRegistrations');
   const { router: driverRegistrationsRoutes } = require('./routes/driverRegistrations');
@@ -97,6 +116,7 @@ function mountRoutes() {
   const vehicleDocumentsRoutes = require('./routes/vehicleDocuments');
 
   app.use('/api/health', healthRoutes);
+  app.use('/api/public', publicAppRoutes);
   app.use('/api/auth', requireDatabase, authRoutes);
   app.use('/api/device', requireDatabase, deviceRoutes);
   app.use('/api/heartbeat', requireDatabase, heartbeatRoutes);
