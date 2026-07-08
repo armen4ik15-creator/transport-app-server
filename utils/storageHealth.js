@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { DATA_DIR, UPLOADS_DIR } = require('../config/paths');
 const { getBackupConfig } = require('../services/backup/backupConfig');
 const { countFilesRecursive, getDirectorySizeBytes } = require('../services/backup/backupArchiver');
+const { readS3Env } = require('../config/s3');
 
 function getStorageHealth() {
   const backupConfig = getBackupConfig();
@@ -27,15 +29,23 @@ function getStorageHealth() {
     dataDirWritable = false;
   }
 
+  const s3 = readS3Env();
   const warnings = [];
+  const onEphemeralDisk = String(DATA_DIR).includes(os.tmpdir()) || DATA_DIR.includes('/tmp/');
+
   if (!dataDirWritable) {
     warnings.push('DATA_DIR недоступен для записи — uploads и локальные бэкапы не сохранятся');
   }
-  if (uploadsFileCount === 0) {
-    warnings.push('Папка uploads пуста — проверьте volume /data на Timeweb');
+  if (onEphemeralDisk) {
+    warnings.push(
+      'Timeweb Apps: диск временный (/tmp). Фото и бэкапы исчезнут при redeploy — настройте S3.'
+    );
   }
-  if (!backupConfig.s3.enabled) {
-    warnings.push('S3 не настроен — off-site бэкапы отключены');
+  if (!s3.enabled) {
+    warnings.push('S3 не настроен — файлы и off-site бэкапы не защищены');
+  }
+  if (backups.length === 0) {
+    warnings.push('Локальных ZIP-бэкапов нет — запустите POST /api/backups/run');
   }
   if (backups.length === 0) {
     warnings.push('Локальных ZIP-бэкапов нет — запустите POST /api/backups/run');
@@ -54,9 +64,11 @@ function getStorageHealth() {
     backup_interval_hours: backupConfig.intervalHours,
     remote: {
       s3: backupConfig.s3.enabled,
+      s3_uploads: s3.enabled,
       webhook: Boolean(backupConfig.webhookUrl),
       telegram: Boolean(backupConfig.telegram.botToken && backupConfig.telegram.chatId),
     },
+    ephemeral_disk: onEphemeralDisk,
     warnings,
     healthy: warnings.length === 0,
   };

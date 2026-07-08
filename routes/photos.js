@@ -121,8 +121,8 @@ router.get('/', (req, res) => {
   return res.json(rows);
 });
 
-/** Отдача файла через /api — работает за reverse-proxy, где /uploads недоступен снаружи. */
-router.get('/file', (req, res) => {
+/** Отдача файла через /api — локальный диск или S3 Timeweb. */
+router.get('/file', async (req, res) => {
   const relativePath = req.query.path;
   if (!relativePath || typeof relativePath !== 'string') {
     return res.status(400).json({ error: 'path required' });
@@ -134,14 +134,24 @@ router.get('/file', (req, res) => {
   }
 
   const absolute = resolveUploadAbsolutePath(normalizedPath);
-  if (!absolute) {
-    return res.status(404).json({
-      error: 'File not found',
-      path: normalizedPath,
-    });
+  if (absolute) {
+    return res.sendFile(path.resolve(absolute));
   }
 
-  return res.sendFile(path.resolve(absolute));
+  try {
+    const streamed = await require('../utils/uploadsStorage').streamUploadToResponse(
+      normalizedPath,
+      res
+    );
+    if (streamed) return undefined;
+  } catch (error) {
+    console.warn('[photos] S3 stream failed:', error.message);
+  }
+
+  return res.status(404).json({
+    error: 'File not found',
+    path: normalizedPath,
+  });
 });
 
 module.exports = router;

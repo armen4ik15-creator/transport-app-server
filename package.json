@@ -10,6 +10,7 @@
     "backup": "node scripts/backup-full.js",
     "backup:full": "node scripts/fullBackup.js",
     "restore": "node scripts/restore-full.js",
+    "setup:check": "node scripts/setup-production-check.js",
     "setup-founder": "node scripts/setup-founder.js",
     "timeweb-deploy": "node scripts/timeweb-deploy.js",
     "timeweb-fix-db": "node scripts/timeweb-fix-db.js"

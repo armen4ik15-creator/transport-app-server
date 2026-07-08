@@ -6,6 +6,7 @@ const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { isUploadFileAvailable } = require('../utils/uploadPaths');
+const { uploadLocalFileToS3, existsOnS3 } = require('../utils/uploadsStorage');
 
 const router = express.Router();
 
@@ -160,7 +161,26 @@ function enrichTripRow(row) {
   return { ...row, photo_available: photoAvailable };
 }
 
-router.get('/', (req, res) => {
+async function enrichTripRowAsync(row) {
+  if (!row) return row;
+  const photoPath = row.photo_path ? String(row.photo_path).trim() : '';
+  if (!photoPath) return { ...row, photo_available: false };
+  const photoAvailable =
+    isUploadFileAvailable(photoPath) || (await existsOnS3(photoPath));
+  return { ...row, photo_available: photoAvailable };
+}
+
+async function mirrorTripPhotoToS3(webPath) {
+  const absolute = require('../utils/uploadPaths').resolveUploadAbsolutePath(webPath);
+  if (!absolute) return;
+  try {
+    await uploadLocalFileToS3(webPath, absolute);
+  } catch (error) {
+    console.warn('[uploads] S3 mirror failed:', error.message);
+  }
+}
+
+router.get('/', async (req, res) => {
   const orderId = req.query.order_id ? Number(req.query.order_id) : null;
   let driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
   const from = req.query.from ? String(req.query.from) : null;
@@ -205,7 +225,8 @@ router.get('/', (req, res) => {
     )
     .all(...params, limit);
 
-  return res.json(rows.map(enrichTripRow));
+  const enriched = await Promise.all(rows.map((row) => enrichTripRowAsync(row)));
+  return res.json(enriched);
 });
 
 router.get('/summary', (req, res) => {
@@ -388,7 +409,7 @@ router.post('/', (req, res, next) => {
 
 router.post('/:id/photo', (req, res, next) => {
   return upload.single('photo')(req, res, next);
-}, (req, res) => {
+}, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) {
     cleanupUploadedFile(req.file);
@@ -433,9 +454,10 @@ router.post('/:id/photo', (req, res, next) => {
 
   const filePath = `/uploads/trips/${req.file.filename}`;
   db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
+  await mirrorTripPhotoToS3(filePath);
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
-  return res.json(enrichTripRow(updatedTrip));
+  return res.json(await enrichTripRowAsync(updatedTrip));
 });
 
 router.delete('/:id', (req, res) => {
