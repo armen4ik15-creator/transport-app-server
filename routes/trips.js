@@ -39,6 +39,7 @@ const upload = multer({
 function handlePhotoUpload(req, res, next) {
   upload.single('photo')(req, res, (err) => {
     if (!err) return next();
+    console.warn('[trips][photo][multer]', err.message || err);
     if (req.file) cleanupUploadedFile(req.file);
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(413).json({ error: 'Файл слишком большой (максимум 10 МБ)' });
@@ -427,6 +428,14 @@ router.post('/', (req, res, next) => {
 
 router.post('/:id/photo', handlePhotoUpload, async (req, res) => {
   const id = Number(req.params.id);
+  console.log('[trips][photo]', {
+    id,
+    hasFile: Boolean(req.file),
+    fileSize: req.file?.size ?? 0,
+    mimetype: req.file?.mimetype ?? null,
+    contentType: String(req.headers['content-type'] || '').slice(0, 80),
+    userId: req.user?.id ?? null,
+  });
   if (!Number.isFinite(id) || id <= 0) {
     cleanupUploadedFile(req.file);
     return res.status(400).json({ error: 'Некорректный id' });
