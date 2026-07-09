@@ -28,12 +28,30 @@ const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-      return cb(new Error('Разрешены только изображения'));
+    const mime = String(file.mimetype || '').toLowerCase();
+    if (!mime || mime.startsWith('image/') || mime === 'application/octet-stream') {
+      return cb(null, true);
     }
-    cb(null, true);
+    return cb(new Error('Разрешены только изображения (JPG, PNG)'));
   },
 });
+
+function handlePhotoUpload(req, res, next) {
+  upload.single('photo')(req, res, (err) => {
+    if (!err) return next();
+    if (req.file) cleanupUploadedFile(req.file);
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Файл слишком большой (максимум 10 МБ)' });
+    }
+    return res.status(400).json({
+      error: err.message || 'Не удалось загрузить файл',
+    });
+  });
+}
+
+function isTripCompletedRow(trip) {
+  return trip.status === 'completed' || trip.stage === 'unloading';
+}
 
 router.use(authMiddleware);
 
@@ -279,7 +297,7 @@ router.get('/summary', (req, res) => {
 router.post('/', (req, res, next) => {
   const contentType = String(req.headers['content-type'] || '');
   if (contentType.includes('multipart/form-data')) {
-    return upload.single('photo')(req, res, next);
+    return handlePhotoUpload(req, res, next);
   }
   next();
 }, (req, res) => {
@@ -407,9 +425,7 @@ router.post('/', (req, res, next) => {
   return res.json(enrichTripRow(trip));
 });
 
-router.post('/:id/photo', (req, res, next) => {
-  return upload.single('photo')(req, res, next);
-}, async (req, res) => {
+router.post('/:id/photo', handlePhotoUpload, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) {
     cleanupUploadedFile(req.file);
@@ -441,8 +457,7 @@ router.post('/:id/photo', (req, res, next) => {
     }
   }
 
-  const isCompleted =
-    trip.status === 'completed' || (trip.status == null && trip.stage === 'unloading');
+  const isCompleted = isTripCompletedRow(trip);
   if (!isCompleted) {
     cleanupUploadedFile(req.file);
     return res.status(400).json({ error: 'Фото можно прикрепить только к завершённому рейсу' });
