@@ -199,6 +199,64 @@ async function mirrorTripPhotoToS3(webPath) {
   }
 }
 
+function extensionFromMime(mimeType) {
+  const mime = String(mimeType || '').toLowerCase();
+  if (mime.includes('png')) return '.png';
+  if (mime.includes('webp')) return '.webp';
+  return '.jpg';
+}
+
+function validateTripPhotoAccess(req, res, id, trip) {
+  if (!trip) {
+    return { error: { status: 404, message: 'Рейс не найден' } };
+  }
+
+  const order = db.prepare('SELECT id, driver_id FROM orders WHERE id = ?').get(trip.order_id);
+  if (!order || !isAllowedForOrder(req, order)) {
+    return { error: { status: 403, message: 'Нет доступа к этому рейсу' } };
+  }
+
+  if (req.user.role !== 'admin') {
+    const driverId = getDriverIdForUser(req.user.id);
+    if (!driverId || Number(trip.driver_id) !== driverId) {
+      return { error: { status: 403, message: 'Недостаточно прав' } };
+    }
+  }
+
+  if (!isTripCompletedRow(trip)) {
+    return { error: { status: 400, message: 'Фото можно прикрепить только к завершённому рейсу' } };
+  }
+
+  return { order };
+}
+
+async function persistTripPhoto(req, res, id, buffer, mimeType) {
+  const trip = db
+    .prepare('SELECT id, order_id, driver_id, status, stage, photo_path FROM trips WHERE id = ?')
+    .get(id);
+
+  const access = validateTripPhotoAccess(req, res, id, trip);
+  if (access.error) {
+    return res.status(access.error.status).json({ error: access.error.message });
+  }
+
+  if (trip.photo_path) {
+    unlinkStoredUpload(trip.photo_path);
+  }
+
+  const ext = extensionFromMime(mimeType);
+  const filename = `trip_${Date.now()}${ext}`;
+  const absolutePath = path.join(TRIPS_UPLOAD_DIR, filename);
+  fs.writeFileSync(absolutePath, buffer);
+
+  const filePath = `/uploads/trips/${filename}`;
+  db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
+  await mirrorTripPhotoToS3(filePath);
+
+  const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
+  return res.json(await enrichTripRowAsync(updatedTrip));
+}
+
 router.get('/', async (req, res) => {
   const orderId = req.query.order_id ? Number(req.query.order_id) : null;
   let driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
@@ -426,6 +484,42 @@ router.post('/', (req, res, next) => {
   return res.json(enrichTripRow(trip));
 });
 
+router.post('/:id/photo-data', async (req, res) => {
+  const id = Number(req.params.id);
+  console.log('[trips][photo-data]', {
+    id,
+    userId: req.user?.id ?? null,
+    bodyBytes: typeof req.body?.image_data === 'string' ? req.body.image_data.length : 0,
+    mimeType: req.body?.mime_type ?? null,
+  });
+
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Некорректный id' });
+  }
+
+  const rawData = req.body?.image_data;
+  if (typeof rawData !== 'string' || !rawData.trim()) {
+    return res.status(400).json({ error: 'Фото обязательно (image_data)' });
+  }
+
+  let buffer;
+  try {
+    buffer = Buffer.from(rawData, 'base64');
+  } catch {
+    return res.status(400).json({ error: 'Некорректные данные фото (base64)' });
+  }
+
+  if (!buffer.length) {
+    return res.status(400).json({ error: 'Файл фото пустой' });
+  }
+  if (buffer.length > 8 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Файл слишком большой (максимум 8 МБ)' });
+  }
+
+  const mimeType = req.body?.mime_type ? String(req.body.mime_type) : 'image/jpeg';
+  return persistTripPhoto(req, res, id, buffer, mimeType);
+});
+
 router.post('/:id/photo', handlePhotoUpload, async (req, res) => {
   const id = Number(req.params.id);
   console.log('[trips][photo]', {
@@ -444,44 +538,16 @@ router.post('/:id/photo', handlePhotoUpload, async (req, res) => {
     return res.status(400).json({ error: 'Фото обязательно' });
   }
 
-  const trip = db
-    .prepare('SELECT id, order_id, driver_id, status, stage, photo_path FROM trips WHERE id = ?')
-    .get(id);
-  if (!trip) {
+  try {
+    const buffer = fs.readFileSync(req.file.path);
+    const mimeType = req.file.mimetype || 'image/jpeg';
     cleanupUploadedFile(req.file);
-    return res.status(404).json({ error: 'Рейс не найден' });
-  }
-
-  const order = db.prepare('SELECT id, driver_id FROM orders WHERE id = ?').get(trip.order_id);
-  if (!order || !isAllowedForOrder(req, order)) {
+    return persistTripPhoto(req, res, id, buffer, mimeType);
+  } catch (error) {
     cleanupUploadedFile(req.file);
-    return res.status(403).json({ error: 'Нет доступа к этому рейсу' });
+    console.error('[trips][photo] read failed:', error.message);
+    return res.status(500).json({ error: 'Не удалось сохранить фото' });
   }
-
-  if (req.user.role !== 'admin') {
-    const driverId = getDriverIdForUser(req.user.id);
-    if (!driverId || Number(trip.driver_id) !== driverId) {
-      cleanupUploadedFile(req.file);
-      return res.status(403).json({ error: 'Недостаточно прав' });
-    }
-  }
-
-  const isCompleted = isTripCompletedRow(trip);
-  if (!isCompleted) {
-    cleanupUploadedFile(req.file);
-    return res.status(400).json({ error: 'Фото можно прикрепить только к завершённому рейсу' });
-  }
-
-  if (trip.photo_path) {
-    unlinkStoredUpload(trip.photo_path);
-  }
-
-  const filePath = `/uploads/trips/${req.file.filename}`;
-  db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
-  await mirrorTripPhotoToS3(filePath);
-
-  const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
-  return res.json(await enrichTripRowAsync(updatedTrip));
 });
 
 router.delete('/:id', (req, res) => {

@@ -35,7 +35,7 @@ app.use(compression());
 app.use(cors());
 app.use(
   express.json({
-    limit: '5mb',
+    limit: '12mb',
     verify: (req, _res, buf) => {
       if (buf?.length) {
         req.rawBody = buf.toString('utf8');
