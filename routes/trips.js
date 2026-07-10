@@ -230,6 +230,26 @@ function validateTripPhotoAccess(req, res, id, trip) {
   return { order };
 }
 
+function validateTripPhotoDeleteAccess(req, trip) {
+  if (!trip) {
+    return { error: { status: 404, message: 'Рейс не найден' } };
+  }
+
+  const order = db.prepare('SELECT id, driver_id FROM orders WHERE id = ?').get(trip.order_id);
+  if (!order || !isAllowedForOrder(req, order)) {
+    return { error: { status: 403, message: 'Нет доступа к этому рейсу' } };
+  }
+
+  if (req.user.role !== 'admin') {
+    const driverId = getDriverIdForUser(req.user.id);
+    if (!driverId || Number(trip.driver_id) !== driverId) {
+      return { error: { status: 403, message: 'Недостаточно прав' } };
+    }
+  }
+
+  return { ok: true };
+}
+
 async function persistTripPhoto(req, res, id, buffer, mimeType) {
   const trip = db
     .prepare('SELECT id, order_id, driver_id, status, stage, photo_path FROM trips WHERE id = ?')
@@ -548,6 +568,32 @@ router.post('/:id/photo', handlePhotoUpload, async (req, res) => {
     console.error('[trips][photo] read failed:', error.message);
     return res.status(500).json({ error: 'Не удалось сохранить фото' });
   }
+});
+
+router.delete('/:id/photo', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Некорректный id' });
+  }
+
+  const trip = db
+    .prepare('SELECT id, order_id, driver_id, status, stage, photo_path FROM trips WHERE id = ?')
+    .get(id);
+
+  const access = validateTripPhotoDeleteAccess(req, trip);
+  if (access.error) {
+    return res.status(access.error.status).json({ error: access.error.message });
+  }
+
+  if (!trip.photo_path || !String(trip.photo_path).trim()) {
+    return res.status(400).json({ error: 'У рейса нет прикреплённого фото' });
+  }
+
+  unlinkStoredUpload(trip.photo_path);
+  db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
+
+  console.log('[trips][photo-delete]', { id, userId: req.user?.id ?? null });
+  return res.json({ success: true, message: 'Фото удалено' });
 });
 
 router.delete('/:id', (req, res) => {

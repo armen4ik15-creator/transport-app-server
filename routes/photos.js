@@ -31,6 +31,8 @@ const ORDER_PHOTOS_SELECT = `
     c.name AS contractor_name,
     o.material,
     o.driver_id,
+    NULL AS trip_id,
+    NULL AS ttn_number,
     'order' AS source
   FROM order_photos op
   JOIN orders o ON o.id = op.order_id
@@ -45,12 +47,14 @@ const TRIP_PHOTOS_SELECT = `
     t.order_id,
     t.photo_path AS file_path,
     t.created_by AS uploaded_by,
-    t.created_at AS uploaded_at,
+    COALESCE(t.completed_at, t.created_at) AS uploaded_at,
     du.full_name AS driver_name,
     o.created_at AS order_date,
     c.name AS contractor_name,
     o.material,
     t.driver_id,
+    t.id AS trip_id,
+    t.ttn_number,
     'trip' AS source
   FROM trips t
   JOIN orders o ON o.id = t.order_id
@@ -96,7 +100,7 @@ function buildFilters(req) {
   return { where, params, empty: false };
 }
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const limit = Math.min(parsePositiveInt(req.query.limit, 50), 200);
   const offset = parsePositiveInt(req.query.offset, 0);
   const { where, params, empty } = buildFilters(req);
@@ -118,7 +122,14 @@ router.get('/', (req, res) => {
   `;
 
   const rows = db.prepare(sql).all(...params, limit, offset);
-  return res.json(rows);
+  const { isUploadAvailable } = require('../utils/uploadsStorage');
+  const enriched = await Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      photo_available: row.file_path ? await isUploadAvailable(row.file_path) : false,
+    }))
+  );
+  return res.json(enriched);
 });
 
 /** Отдача файла через /api — локальный диск или S3 Timeweb. */
