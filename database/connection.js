@@ -34,7 +34,10 @@ function getHostCandidates() {
     addHost(isPrivateHost(host) ? privateHosts : publicHosts, host);
   }
 
-  return [...privateHosts, ...publicHosts];
+  // App Platform Express часто не имеет стабильного маршрута до private IP БД.
+  // Сначала пробуем public (с SSL), затем private.
+  const preferPrivate = process.env.DB_PREFER_PRIVATE === 'true';
+  return preferPrivate ? [...privateHosts, ...publicHosts] : [...publicHosts, ...privateHosts];
 }
 
 function resolveSslConfig(connectionString) {
