@@ -7,7 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { isUploadFileAvailable } = require('../utils/uploadPaths');
 const { existsOnS3 } = require('../utils/uploadsStorage');
-const { queueUploadMirror } = require('../utils/uploadPersistence');
+const { persistUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
 
@@ -281,10 +281,18 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
 
   const filePath = `/uploads/trips/${filename}`;
   db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
-  queueUploadMirror(filePath, { buffer, mimeType });
+
+  try {
+    await persistUploadMirror(filePath, { buffer, mimeType });
+  } catch (error) {
+    db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
+    unlinkStoredUpload(filePath);
+    return res.status(503).json({ error: error.message });
+  }
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
-  return res.json(enrichTripRow(updatedTrip));
+  const enriched = await enrichTripRowAsync(updatedTrip);
+  return res.json(enriched);
 }
 
 router.get('/', async (req, res) => {
@@ -470,12 +478,19 @@ router.post('/', (req, res, next) => {
       if (req.file?.path && fs.existsSync(req.file.path)) {
         buffer = fs.readFileSync(req.file.path);
       }
-      queueUploadMirror(filePath, {
-        buffer,
-        mimeType: req.file?.mimetype || 'image/jpeg',
-      });
+      try {
+        await persistUploadMirror(filePath, {
+          buffer,
+          mimeType: req.file?.mimetype || 'image/jpeg',
+        });
+      } catch (error) {
+        db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(trip.id);
+        unlinkStoredUpload(filePath);
+        return res.status(503).json({ error: error.message });
+      }
     }
-    return res.status(201).json(enrichTripRow(trip));
+    const enriched = await enrichTripRowAsync(trip);
+    return res.status(201).json(enriched);
   }
 
   const activeTrip = db
@@ -526,12 +541,19 @@ router.post('/', (req, res, next) => {
     if (req.file?.path && fs.existsSync(req.file.path)) {
       buffer = fs.readFileSync(req.file.path);
     }
-    queueUploadMirror(filePath, {
-      buffer,
-      mimeType: req.file?.mimetype || 'image/jpeg',
-    });
+    try {
+      await persistUploadMirror(filePath, {
+        buffer,
+        mimeType: req.file?.mimetype || 'image/jpeg',
+      });
+    } catch (error) {
+      db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(activeTrip.photo_path, activeTrip.id);
+      unlinkStoredUpload(filePath);
+      return res.status(503).json({ error: error.message });
+    }
   }
-  return res.json(enrichTripRow(trip));
+  const enriched = await enrichTripRowAsync(trip);
+  return res.json(enriched);
 });
 
 router.post('/:id/photo-data', async (req, res) => {
