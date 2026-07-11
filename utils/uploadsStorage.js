@@ -58,7 +58,9 @@ async function uploadLocalFileToS3(webPath, absolutePath) {
   return true;
 }
 
-async function existsOnS3(webPath) {
+const S3_CHECK_TIMEOUT_MS = Number(process.env.S3_CHECK_TIMEOUT_MS) || 4000;
+
+async function existsOnS3(webPath, timeoutMs = S3_CHECK_TIMEOUT_MS) {
   const config = readS3Env();
   if (!config.enabled) return false;
 
@@ -66,11 +68,19 @@ async function existsOnS3(webPath) {
   const key = getUploadsObjectKey(webPath);
   if (!client || !key) return false;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }));
+    await client.send(
+      new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: controller.signal }
+    );
     return true;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
