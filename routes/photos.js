@@ -123,11 +123,14 @@ router.get('/', async (req, res) => {
 
   const rows = db.prepare(sql).all(...params, limit, offset);
   const { isUploadAvailable } = require('../utils/uploadsStorage');
-  const enriched = await Promise.all(
-    rows.map(async (row) => ({
+  const { mapWithConcurrency } = require('../utils/mapWithConcurrency');
+  const enriched = await mapWithConcurrency(
+    rows,
+    async (row) => ({
       ...row,
       photo_available: row.file_path ? await isUploadAvailable(row.file_path) : false,
-    }))
+    }),
+    6
   );
   return res.json(enriched);
 });

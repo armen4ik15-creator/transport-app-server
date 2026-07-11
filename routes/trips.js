@@ -196,21 +196,9 @@ async function enrichTripRowAsync(row) {
   return { ...row, photo_available: photoAvailable };
 }
 
-async function mapTripsWithPhotoAvailability(rows, concurrency = 4) {
-  const enriched = new Array(rows.length);
-  let index = 0;
-
-  async function worker() {
-    while (index < rows.length) {
-      const current = index;
-      index += 1;
-      enriched[current] = await enrichTripRowAsync(rows[current]);
-    }
-  }
-
-  const workers = Math.min(concurrency, rows.length);
-  await Promise.all(Array.from({ length: workers }, () => worker()));
-  return enriched;
+async function mapTripsWithPhotoAvailability(rows, concurrency = 6) {
+  const { mapWithConcurrency } = require('../utils/mapWithConcurrency');
+  return mapWithConcurrency(rows, (row) => enrichTripRowAsync(row), concurrency);
 }
 
 function extensionFromMime(mimeType) {

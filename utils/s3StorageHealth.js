@@ -1,7 +1,30 @@
 const { randomUUID } = require('crypto');
-const { ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { readS3Env, createS3Client } = require('../config/s3');
 const { getUploadDirHealth } = require('../config/paths');
+
+const HEALTH_CACHE_MS = Number(process.env.STORAGE_HEALTH_CACHE_MS) || 5 * 60 * 1000;
+const S3_PROBE_TIMEOUT_MS = Number(process.env.S3_PROBE_TIMEOUT_MS) || 6000;
+
+let cachedReport = null;
+let cachedAt = 0;
+
+function withTimeout(promise, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 async function probeS3Storage() {
   const config = readS3Env();
@@ -30,18 +53,30 @@ async function probeS3Storage() {
     };
   }
 
-  let reachable = false;
-  let objectCount = 0;
+  const probeKey = `${uploadsPrefix}_health_probe_${randomUUID()}.txt`;
   try {
-    const listed = await client.send(
-      new ListObjectsV2Command({
-        Bucket: config.bucket,
-        Prefix: uploadsPrefix,
-        MaxKeys: 5,
-      })
+    await withTimeout(
+      client.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: probeKey,
+          Body: 'ok',
+          ContentType: 'text/plain',
+        })
+      ),
+      S3_PROBE_TIMEOUT_MS,
+      'S3 write probe'
     );
-    reachable = true;
-    objectCount = listed.KeyCount ?? (listed.Contents?.length ?? 0);
+    await withTimeout(
+      client.send(
+        new DeleteObjectCommand({
+          Bucket: config.bucket,
+          Key: probeKey,
+        })
+      ),
+      S3_PROBE_TIMEOUT_MS,
+      'S3 delete probe'
+    );
   } catch (error) {
     return {
       configured: true,
@@ -50,62 +85,39 @@ async function probeS3Storage() {
       bucket: config.bucket,
       uploads_prefix: uploadsPrefix,
       error: error.message,
-      message: 'S3 недоступен — проверьте ключи и bucket',
-    };
-  }
-
-  const probeKey = `${uploadsPrefix}_health_probe_${randomUUID()}.txt`;
-  let writable = false;
-  try {
-    await client.send(
-      new PutObjectCommand({
-        Bucket: config.bucket,
-        Key: probeKey,
-        Body: 'ok',
-        ContentType: 'text/plain',
-      })
-    );
-    await client.send(
-      new DeleteObjectCommand({
-        Bucket: config.bucket,
-        Key: probeKey,
-      })
-    );
-    writable = true;
-  } catch (error) {
-    return {
-      configured: true,
-      reachable,
-      writable: false,
-      bucket: config.bucket,
-      uploads_prefix: uploadsPrefix,
-      sample_object_count: objectCount,
-      error: error.message,
-      message: 'S3 доступен для чтения, но запись не работает',
+      message: 'S3 недоступен или не отвечает вовремя — проверьте ключи и bucket',
     };
   }
 
   return {
     configured: true,
-    reachable,
-    writable,
+    reachable: true,
+    writable: true,
     bucket: config.bucket,
     uploads_prefix: uploadsPrefix,
-    sample_object_count: objectCount,
     message: 'S3 готов для постоянного хранения фото',
   };
 }
 
-async function getFullStorageHealth() {
+async function getFullStorageHealth(options = {}) {
+  const force = options.force === true;
+  if (!force && cachedReport && Date.now() - cachedAt < HEALTH_CACHE_MS) {
+    return cachedReport;
+  }
+
   const local = getUploadDirHealth();
   const s3 = await probeS3Storage();
 
-  return {
+  const report = {
     ...local,
     s3,
     photo_storage_ready: s3.writable || local.persistent_volume,
     healthy: s3.writable || (local.persistent_volume && local.upload_dir_writable),
   };
+
+  cachedReport = report;
+  cachedAt = Date.now();
+  return report;
 }
 
 module.exports = {

@@ -3,6 +3,43 @@ const path = require('path');
 const { GetObjectCommand, HeadObjectCommand, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { createS3Client, readS3Env } = require('../config/s3');
 const { resolveUploadAbsolutePath, normalizeUploadWebPath } = require('./uploadPaths');
+const {
+  getCachedAvailability,
+  setCachedAvailability,
+  markUploadAvailable,
+  invalidateUploadAvailability,
+} = require('./uploadAvailabilityCache');
+
+const S3_MAX_CONCURRENT = Number(process.env.S3_MAX_CONCURRENT) || 8;
+let s3Inflight = 0;
+const s3WaitQueue = [];
+
+function releaseS3Slot() {
+  s3Inflight = Math.max(0, s3Inflight - 1);
+  const next = s3WaitQueue.shift();
+  if (next) next();
+}
+
+function acquireS3Slot() {
+  if (s3Inflight < S3_MAX_CONCURRENT) {
+    s3Inflight += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    s3WaitQueue.push(resolve);
+  }).then(() => {
+    s3Inflight += 1;
+  });
+}
+
+async function sendS3Command(client, command, options) {
+  await acquireS3Slot();
+  try {
+    return await client.send(command, options);
+  } finally {
+    releaseS3Slot();
+  }
+}
 
 function getUploadsObjectKey(webPath) {
   const normalized = normalizeUploadWebPath(webPath);
@@ -33,7 +70,8 @@ async function uploadBufferToS3(webPath, buffer, contentType) {
     throw new Error('S3 client or object key unavailable');
   }
 
-  await client.send(
+  await sendS3Command(
+    client,
     new PutObjectCommand({
       Bucket: config.bucket,
       Key: key,
@@ -41,6 +79,7 @@ async function uploadBufferToS3(webPath, buffer, contentType) {
       ContentType: contentType || guessContentType(webPath),
     })
   );
+  markUploadAvailable(webPath);
   return true;
 }
 
@@ -52,7 +91,8 @@ async function uploadLocalFileToS3(webPath, absolutePath) {
   const key = getUploadsObjectKey(webPath);
   if (!client || !key) return false;
 
-  await client.send(
+  await sendS3Command(
+    client,
     new PutObjectCommand({
       Bucket: config.bucket,
       Key: key,
@@ -60,10 +100,11 @@ async function uploadLocalFileToS3(webPath, absolutePath) {
       ContentType: guessContentType(absolutePath),
     })
   );
+  markUploadAvailable(webPath);
   return true;
 }
 
-const S3_CHECK_TIMEOUT_MS = Number(process.env.S3_CHECK_TIMEOUT_MS) || 4000;
+const S3_CHECK_TIMEOUT_MS = Number(process.env.S3_CHECK_TIMEOUT_MS) || 2500;
 
 async function existsOnS3(webPath, timeoutMs = S3_CHECK_TIMEOUT_MS) {
   const config = readS3Env();
@@ -77,7 +118,8 @@ async function existsOnS3(webPath, timeoutMs = S3_CHECK_TIMEOUT_MS) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    await client.send(
+    await sendS3Command(
+      client,
       new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
       { abortSignal: controller.signal }
     );
@@ -97,7 +139,7 @@ async function streamUploadToResponse(webPath, res) {
   const key = getUploadsObjectKey(webPath);
   if (!client || !key) return false;
 
-  const response = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
+  const response = await sendS3Command(client, new GetObjectCommand({ Bucket: config.bucket, Key: key }));
   if (!response.Body) return false;
 
   res.setHeader('Content-Type', response.ContentType || guessContentType(webPath));
@@ -128,7 +170,8 @@ async function deleteFromS3(webPath) {
   if (!client || !key) return false;
 
   try {
-    await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+    await sendS3Command(client, new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+    invalidateUploadAvailability(webPath);
     return true;
   } catch (error) {
     console.warn('[uploads] S3 delete failed:', error.message);
@@ -140,13 +183,20 @@ async function isUploadAvailable(webPath) {
   const normalized = normalizeUploadWebPath(webPath);
   if (!normalized) return false;
 
+  const cached = getCachedAvailability(normalized);
+  if (cached !== undefined) return cached;
+
   const s3 = readS3Env();
+  let available = false;
   if (s3.enabled) {
-    return existsOnS3(normalized);
+    available = await existsOnS3(normalized);
+  } else {
+    const absolute = resolveUploadAbsolutePath(normalized);
+    available = Boolean(absolute);
   }
 
-  const absolute = resolveUploadAbsolutePath(normalized);
-  return Boolean(absolute);
+  setCachedAvailability(normalized, available);
+  return available;
 }
 
 async function deleteStoredUpload(webPath) {
@@ -163,6 +213,7 @@ async function deleteStoredUpload(webPath) {
   }
 
   await deleteFromS3(normalized);
+  invalidateUploadAvailability(normalized);
 }
 
 module.exports = {
@@ -174,4 +225,6 @@ module.exports = {
   streamUploadToResponse,
   isUploadAvailable,
   deleteStoredUpload,
+  markUploadAvailable,
+  invalidateUploadAvailability,
 };

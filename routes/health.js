@@ -68,17 +68,35 @@ router.get('/', (_req, res) => {
 });
 
 router.get('/storage', async (_req, res) => {
+  const STORAGE_HEALTH_TIMEOUT_MS = Number(process.env.STORAGE_HEALTH_TIMEOUT_MS) || 10_000;
   try {
     const { getFullStorageHealth } = require('../utils/s3StorageHealth');
-    const report = await getFullStorageHealth();
+    const report = await Promise.race([
+      getFullStorageHealth(),
+      new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error('storage health probe timeout')),
+          STORAGE_HEALTH_TIMEOUT_MS
+        );
+      }),
+    ]);
     return res.json({
       status: report.healthy ? 'ok' : 'degraded',
       ...report,
     });
   } catch (error) {
-    return res.status(500).json({
-      status: 'error',
+    const local = require('../config/paths').getUploadDirHealth();
+    return res.status(503).json({
+      status: 'degraded',
+      ...local,
+      healthy: false,
       error: error.message,
+      s3: {
+        configured: Boolean(process.env.S3_BUCKET),
+        reachable: false,
+        writable: false,
+        message: 'Диагностика S3 не завершилась вовремя',
+      },
     });
   }
 });

@@ -1,10 +1,10 @@
 const fs = require('fs');
 const { readS3Env } = require('../config/s3');
-const { uploadBufferToS3, uploadLocalFileToS3, existsOnS3 } = require('./uploadsStorage');
+const { uploadBufferToS3, uploadLocalFileToS3, existsOnS3, markUploadAvailable } = require('./uploadsStorage');
 const { resolveUploadAbsolutePath } = require('./uploadPaths');
 
-const S3_VERIFY_TIMEOUT_MS = Number(process.env.S3_VERIFY_TIMEOUT_MS) || 12000;
-const S3_VERIFY_RETRIES = Number(process.env.S3_VERIFY_RETRIES) || 5;
+const S3_VERIFY_TIMEOUT_MS = Number(process.env.S3_VERIFY_TIMEOUT_MS) || 5000;
+const S3_VERIFY_RETRIES = Number(process.env.S3_VERIFY_RETRIES) || 2;
 
 /**
  * Фоновое зеркалирование (для некритичных upload-роутов).
@@ -44,7 +44,7 @@ async function waitForS3Object(webPath) {
     const found = await existsOnS3(webPath, S3_VERIFY_TIMEOUT_MS);
     if (found) return true;
     if (attempt < S3_VERIFY_RETRIES - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      await new Promise((resolve) => setTimeout(resolve, 400));
     }
   }
   return false;
@@ -70,6 +70,7 @@ async function persistUploadMirror(webPath, options = {}) {
       'Фото не сохранилось в S3. Проверьте интернет и повторите загрузку.'
     );
   }
+  markUploadAvailable(webPath);
 }
 
 module.exports = {

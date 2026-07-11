@@ -1,4 +1,11 @@
 const { S3Client, ListObjectsV2Command, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { NodeHttpHandler } = require('@smithy/node-http-handler');
+
+const S3_CONNECTION_TIMEOUT_MS = Number(process.env.S3_CONNECTION_TIMEOUT_MS) || 5000;
+const S3_REQUEST_TIMEOUT_MS = Number(process.env.S3_REQUEST_TIMEOUT_MS) || 8000;
+
+let cachedClient = null;
+let cachedClientKey = null;
 
 function readS3Env() {
   const bucket = process.env.S3_BUCKET || process.env.BACKUP_S3_BUCKET || '';
@@ -22,7 +29,12 @@ function readS3Env() {
 function createS3Client(config = readS3Env()) {
   if (!config.enabled) return null;
 
-  return new S3Client({
+  const clientKey = `${config.bucket}|${config.accessKey}|${config.endpoint || ''}|${config.region}`;
+  if (cachedClient && cachedClientKey === clientKey) {
+    return cachedClient;
+  }
+
+  cachedClient = new S3Client({
     region: config.region,
     endpoint: config.endpoint || undefined,
     forcePathStyle: Boolean(config.endpoint),
@@ -30,7 +42,14 @@ function createS3Client(config = readS3Env()) {
       accessKeyId: config.accessKey,
       secretAccessKey: config.secretKey,
     },
+    maxAttempts: 2,
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: S3_CONNECTION_TIMEOUT_MS,
+      requestTimeout: S3_REQUEST_TIMEOUT_MS,
+    }),
   });
+  cachedClientKey = clientKey;
+  return cachedClient;
 }
 
 async function uploadFileToS3({ client, bucket, key, filePath, contentType = 'application/zip' }) {
