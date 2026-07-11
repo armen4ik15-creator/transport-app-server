@@ -16,20 +16,25 @@ function buildConnectionString(hostOverride) {
   return `postgresql://${encodedUser}:${encodedPassword}@${host}:${port}/${database}?connect_timeout=${timeoutSec}`;
 }
 
+function isPrivateHost(host) {
+  return /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(String(host || '').trim());
+}
+
 function getHostCandidates() {
-  const hosts = [];
-  const addHost = (value) => {
+  const privateHosts = [];
+  const publicHosts = [];
+  const addHost = (bucket, value) => {
     const host = String(value || '').trim();
-    if (host && !hosts.includes(host)) {
-      hosts.push(host);
-    }
+    if (!host || bucket.includes(host)) return;
+    bucket.push(host);
   };
 
-  addHost(process.env.DB_HOST);
+  addHost(isPrivateHost(process.env.DB_HOST) ? privateHosts : publicHosts, process.env.DB_HOST);
   for (const host of String(process.env.DB_FALLBACK_HOSTS || '').split(',')) {
-    addHost(host);
+    addHost(isPrivateHost(host) ? privateHosts : publicHosts, host);
   }
-  return hosts;
+
+  return [...privateHosts, ...publicHosts];
 }
 
 function resolveSslConfig(connectionString) {

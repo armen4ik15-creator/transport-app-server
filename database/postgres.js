@@ -8,20 +8,34 @@ const { createFailedAdapter } = require('./failed');
 
 let txClient = null;
 
-function waitPromise(promise) {
+function waitPromise(promise, timeoutMs = Number(process.env.DB_QUERY_TIMEOUT_MS || 10000)) {
   let finished = false;
   let result;
   let error;
+
+  const timeoutId = setTimeout(() => {
+    if (finished) return;
+    finished = true;
+    error = Object.assign(new Error(`Database query timeout after ${timeoutMs}ms`), {
+      code: 'ETIMEDOUT',
+    });
+  }, timeoutMs);
+
   promise
     .then((value) => {
-      result = value;
+      if (finished) return;
       finished = true;
+      clearTimeout(timeoutId);
+      result = value;
     })
     .catch((err) => {
-      error = err;
+      if (finished) return;
       finished = true;
+      clearTimeout(timeoutId);
+      error = err;
     });
   deasync.loopWhile(() => !finished);
+  clearTimeout(timeoutId);
   if (error) throw error;
   return result;
 }
@@ -191,32 +205,41 @@ function init(options = {}) {
 
   const maxAttempts = Number(process.env.DB_INIT_RETRIES || 8);
   let lastError = null;
+  const hosts = getHostCandidates();
+  if (hosts.length === 0) {
+    return createFailedAdapter(new Error('PostgreSQL: no DB_HOST configured'));
+  }
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const pool = new Pool(createPoolConfig(connectionString));
-    attachPoolHandlers(pool);
+  for (const host of hosts) {
+    console.log(`[data] PostgreSQL init trying host ${host}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const connectionString = buildConnectionString(host);
+      const pool = new Pool(createPoolConfig(connectionString, host));
+      attachPoolHandlers(pool);
 
-    try {
-      waitPromise(pool.query('SELECT 1'));
-      const db = waitPromise(setupPostgresPool(pool));
-      console.log('[data] PostgreSQL connected');
-      return db;
-    } catch (error) {
-      lastError = error;
-      pool.end().catch(() => {});
-      const retryable = isRetryablePostgresError(error);
-      if (!retryable || attempt === maxAttempts) {
-        console.error('[data] PostgreSQL init failed:', error.message);
-        return createFailedAdapter(error);
+      try {
+        waitPromise(pool.query('SELECT 1'));
+        const db = waitPromise(setupPostgresPool(pool));
+        console.log(`[data] PostgreSQL connected via ${host}`);
+        return db;
+      } catch (error) {
+        lastError = error;
+        pool.end().catch(() => {});
+        const retryable = isRetryablePostgresError(error);
+        if (!retryable || attempt === maxAttempts) {
+          console.error(`[data] PostgreSQL init failed on ${host}:`, error.message);
+          break;
+        }
+        const delayMs = attempt * 2000;
+        console.warn(
+          `[data] PostgreSQL init ${host} attempt ${attempt}/${maxAttempts} failed (${error.code || error.message}), retry in ${delayMs}ms`
+        );
+        waitMs(delayMs);
       }
-      const delayMs = attempt * 2000;
-      console.warn(
-        `[data] PostgreSQL init attempt ${attempt}/${maxAttempts} failed (${error.code || error.message}), retry in ${delayMs}ms`
-      );
-      waitMs(delayMs);
     }
   }
 
+  console.error('[data] PostgreSQL init failed on all hosts:', lastError?.message);
   return createFailedAdapter(lastError || new Error('PostgreSQL init failed'));
 }
 
