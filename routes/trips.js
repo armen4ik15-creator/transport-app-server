@@ -283,8 +283,7 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
   }
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
-  const enriched = await enrichTripRowAsync(updatedTrip);
-  return res.json(enriched);
+  return res.json({ ...updatedTrip, photo_available: true });
 }
 
 router.get('/', async (req, res) => {
@@ -633,7 +632,15 @@ router.delete('/:id/photo', async (req, res) => {
     return res.status(400).json({ error: 'У рейса нет прикреплённого фото' });
   }
 
-  await removeStoredUpload(trip.photo_path);
+  const photoPath = String(trip.photo_path).trim();
+  try {
+    await removeStoredUpload(photoPath);
+  } catch (error) {
+    console.warn('[trips][photo-delete] storage cleanup failed:', error.message);
+  }
+
+  const { invalidateUploadAvailability } = require('../utils/uploadAvailabilityCache');
+  invalidateUploadAvailability(photoPath);
   db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
 
   console.log('[trips][photo-delete]', { id, userId: req.user?.id ?? null });

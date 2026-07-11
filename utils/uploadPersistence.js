@@ -64,12 +64,7 @@ async function persistUploadMirror(webPath, options = {}) {
     return;
   }
 
-  const onS3 = await waitForS3Object(webPath);
-  if (!onS3) {
-    throw new Error(
-      'Фото не сохранилось в S3. Проверьте интернет и повторите загрузку.'
-    );
-  }
+  // PutObject уже успешен — не блокируем ответ повторными HEAD (Timeweb S3 может отвечать с задержкой).
   markUploadAvailable(webPath);
 }
 
