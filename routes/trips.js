@@ -5,8 +5,7 @@ const multer = require('multer');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
-const { isUploadFileAvailable } = require('../utils/uploadPaths');
-const { deleteStoredUpload, isUploadAvailable } = require('../utils/uploadsStorage');
+const { deleteStoredUpload } = require('../utils/uploadsStorage');
 const { persistUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
@@ -182,23 +181,21 @@ function deleteTripPhotoFiles(trip) {
 }
 
 function enrichTripRow(row) {
+  return enrichTripRowFast(row);
+}
+
+function enrichTripRowFast(row) {
   if (!row) return row;
   const photoPath = row.photo_path ? String(row.photo_path).trim() : '';
-  const photoAvailable = photoPath ? isUploadFileAvailable(photoPath) : false;
-  return { ...row, photo_available: photoAvailable };
+  return { ...row, photo_available: Boolean(photoPath) };
 }
 
 async function enrichTripRowAsync(row) {
-  if (!row) return row;
-  const photoPath = row.photo_path ? String(row.photo_path).trim() : '';
-  if (!photoPath) return { ...row, photo_available: false };
-  const photoAvailable = await isUploadAvailable(photoPath);
-  return { ...row, photo_available: photoAvailable };
+  return enrichTripRowFast(row);
 }
 
-async function mapTripsWithPhotoAvailability(rows, concurrency = 6) {
-  const { mapWithConcurrency } = require('../utils/mapWithConcurrency');
-  return mapWithConcurrency(rows, (row) => enrichTripRowAsync(row), concurrency);
+async function mapTripsWithPhotoAvailability(rows) {
+  return rows.map((row) => enrichTripRowFast(row));
 }
 
 function extensionFromMime(mimeType) {
@@ -269,7 +266,7 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
   const ext = extensionFromMime(mimeType);
   const filename = `trip_${Date.now()}${ext}`;
   const absolutePath = path.join(TRIPS_UPLOAD_DIR, filename);
-  fs.writeFileSync(absolutePath, buffer);
+  await fs.promises.writeFile(absolutePath, buffer);
 
   const filePath = `/uploads/trips/${filename}`;
   db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
@@ -277,9 +274,14 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
   try {
     await persistUploadMirror(filePath, { buffer, mimeType });
   } catch (error) {
+    console.error('[trips][photo] S3 persist failed:', error.message);
     db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
     unlinkStoredUpload(filePath);
-    return res.status(503).json({ error: error.message });
+    return res.status(503).json({
+      error:
+        error.message ||
+        'Не удалось сохранить фото в S3. Повторите загрузку через минуту.',
+    });
   }
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);

@@ -4,7 +4,7 @@ const { readS3Env, createS3Client } = require('../config/s3');
 const { getUploadDirHealth } = require('../config/paths');
 
 const HEALTH_CACHE_MS = Number(process.env.STORAGE_HEALTH_CACHE_MS) || 5 * 60 * 1000;
-const S3_PROBE_TIMEOUT_MS = Number(process.env.S3_PROBE_TIMEOUT_MS) || 6000;
+const S3_PROBE_TIMEOUT_MS = Number(process.env.S3_PROBE_TIMEOUT_MS) || 20000;
 
 let cachedReport = null;
 let cachedAt = 0;

@@ -93,14 +93,18 @@ router.get('/:id', (req, res) => {
   const trips = db
     .prepare(
       `SELECT
-         t.id, t.order_id, t.driver_id, t.stage, t.ttn_number, t.volume, t.note, t.photo_path, t.created_by, t.created_at,
+         t.id, t.order_id, t.driver_id, t.stage, t.status, t.ttn_number, t.volume, t.note, t.photo_path, t.created_by, t.created_at,
          u.email AS created_by_email
        FROM trips t
        JOIN users u ON u.id = t.created_by
        WHERE t.order_id = ?
        ORDER BY t.created_at DESC`
     )
-    .all(id);
+    .all(id)
+    .map((trip) => ({
+      ...trip,
+      photo_available: Boolean(trip.photo_path && String(trip.photo_path).trim()),
+    }));
   return res.json({ ...order, photos, trips });
 });
 

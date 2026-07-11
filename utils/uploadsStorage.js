@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { GetObjectCommand, HeadObjectCommand, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { createS3Client, readS3Env } = require('../config/s3');
 const { resolveUploadAbsolutePath, normalizeUploadWebPath } = require('./uploadPaths');
 const {
@@ -10,7 +10,7 @@ const {
   invalidateUploadAvailability,
 } = require('./uploadAvailabilityCache');
 
-const S3_MAX_CONCURRENT = Number(process.env.S3_MAX_CONCURRENT) || 8;
+const S3_MAX_CONCURRENT = Number(process.env.S3_MAX_CONCURRENT) || 4;
 let s3Inflight = 0;
 const s3WaitQueue = [];
 
@@ -91,12 +91,13 @@ async function uploadLocalFileToS3(webPath, absolutePath) {
   const key = getUploadsObjectKey(webPath);
   if (!client || !key) return false;
 
+  const body = fs.readFileSync(absolutePath);
   await sendS3Command(
     client,
     new PutObjectCommand({
       Bucket: config.bucket,
       Key: key,
-      Body: fs.createReadStream(absolutePath),
+      Body: body,
       ContentType: guessContentType(absolutePath),
     })
   );
@@ -104,31 +105,33 @@ async function uploadLocalFileToS3(webPath, absolutePath) {
   return true;
 }
 
-const S3_CHECK_TIMEOUT_MS = Number(process.env.S3_CHECK_TIMEOUT_MS) || 2500;
+/**
+ * Проверка наличия файла.
+ * ВАЖНО: Timeweb S3 HeadObject занимает 10–15с и вешает API при списках рейсов/фото.
+ * Поэтому при включённом S3 доверяем photo_path в БД (файл попал туда после успешного PutObject).
+ * Реальная проверка — при отдаче файла через GetObject.
+ */
+async function isUploadAvailable(webPath) {
+  const normalized = normalizeUploadWebPath(webPath);
+  if (!normalized) return false;
 
-async function existsOnS3(webPath, timeoutMs = S3_CHECK_TIMEOUT_MS) {
-  const config = readS3Env();
-  if (!config.enabled) return false;
+  const cached = getCachedAvailability(normalized);
+  if (cached !== undefined) return cached;
 
-  const client = createS3Client(config);
-  const key = getUploadsObjectKey(webPath);
-  if (!client || !key) return false;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    await sendS3Command(
-      client,
-      new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
-      { abortSignal: controller.signal }
-    );
+  const absolute = resolveUploadAbsolutePath(normalized);
+  if (absolute) {
+    setCachedAvailability(normalized, true);
     return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
   }
+
+  const s3 = readS3Env();
+  if (s3.enabled) {
+    setCachedAvailability(normalized, true);
+    return true;
+  }
+
+  setCachedAvailability(normalized, false);
+  return false;
 }
 
 async function streamUploadToResponse(webPath, res) {
@@ -139,26 +142,34 @@ async function streamUploadToResponse(webPath, res) {
   const key = getUploadsObjectKey(webPath);
   if (!client || !key) return false;
 
-  const response = await sendS3Command(client, new GetObjectCommand({ Bucket: config.bucket, Key: key }));
-  if (!response.Body) return false;
+  try {
+    const response = await sendS3Command(
+      client,
+      new GetObjectCommand({ Bucket: config.bucket, Key: key })
+    );
+    if (!response.Body) return false;
 
-  res.setHeader('Content-Type', response.ContentType || guessContentType(webPath));
-  if (response.ContentLength != null) {
-    res.setHeader('Content-Length', String(response.ContentLength));
-  }
+    res.setHeader('Content-Type', response.ContentType || guessContentType(webPath));
+    if (response.ContentLength != null) {
+      res.setHeader('Content-Length', String(response.ContentLength));
+    }
 
-  const body = response.Body;
-  if (typeof body.pipe === 'function') {
-    body.pipe(res);
+    const body = response.Body;
+    if (typeof body.pipe === 'function') {
+      body.pipe(res);
+      return true;
+    }
+
+    const chunks = [];
+    for await (const chunk of body) {
+      chunks.push(chunk);
+    }
+    res.end(Buffer.concat(chunks));
     return true;
+  } catch (error) {
+    console.warn('[uploads] S3 GetObject failed:', error.message);
+    return false;
   }
-
-  const chunks = [];
-  for await (const chunk of body) {
-    chunks.push(chunk);
-  }
-  res.end(Buffer.concat(chunks));
-  return true;
 }
 
 async function deleteFromS3(webPath) {
@@ -177,26 +188,6 @@ async function deleteFromS3(webPath) {
     console.warn('[uploads] S3 delete failed:', error.message);
     return false;
   }
-}
-
-async function isUploadAvailable(webPath) {
-  const normalized = normalizeUploadWebPath(webPath);
-  if (!normalized) return false;
-
-  const cached = getCachedAvailability(normalized);
-  if (cached !== undefined) return cached;
-
-  const s3 = readS3Env();
-  let available = false;
-  if (s3.enabled) {
-    available = await existsOnS3(normalized);
-  } else {
-    const absolute = resolveUploadAbsolutePath(normalized);
-    available = Boolean(absolute);
-  }
-
-  setCachedAvailability(normalized, available);
-  return available;
 }
 
 async function deleteStoredUpload(webPath) {
@@ -220,7 +211,6 @@ module.exports = {
   getUploadsObjectKey,
   uploadBufferToS3,
   uploadLocalFileToS3,
-  existsOnS3,
   deleteFromS3,
   streamUploadToResponse,
   isUploadAvailable,

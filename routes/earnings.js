@@ -4,7 +4,6 @@ const { authMiddleware } = require('../middleware/auth');
 const {
   calcDriverCompensations,
   COMPLETED_TRIP_SQL,
-  isPhotoAvailableAsync,
 } = require('../utils/salaryCalculations');
 
 const router = express.Router();
@@ -165,24 +164,22 @@ router.get('/summary', async (req, res) => {
 
   const expenseStats = buildExpenseStats(driverId, from, to);
 
-  const trips = await Promise.all(
-    tripRows.map(async (row) => {
-      const photoAvailable = row.photo_path ? await isPhotoAvailableAsync(row.photo_path) : false;
-      const countedInSalary = photoAvailable;
-      return {
-        id: Number(row.id),
-        order_id: Number(row.order_id),
-        ttn_number: row.ttn_number ?? null,
-        volume: row.volume == null ? null : Number(row.volume),
-        created_at: row.created_at,
-        completed_at: row.completed_at ?? null,
-        driver_rate: Number(row.driver_rate || 0),
-        has_photos: countedInSalary,
-        counted_in_salary: countedInSalary,
-        photo_available: photoAvailable,
-      };
-    })
-  );
+  const trips = tripRows.map((row) => {
+    const photoAvailable = Boolean(row.photo_path && String(row.photo_path).trim());
+    const countedInSalary = photoAvailable;
+    return {
+      id: Number(row.id),
+      order_id: Number(row.order_id),
+      ttn_number: row.ttn_number ?? null,
+      volume: row.volume == null ? null : Number(row.volume),
+      created_at: row.created_at,
+      completed_at: row.completed_at ?? null,
+      driver_rate: Number(row.driver_rate || 0),
+      has_photos: countedInSalary,
+      counted_in_salary: countedInSalary,
+      photo_available: photoAvailable,
+    };
+  });
 
   const eligibleTrips = trips.filter((trip) => trip.counted_in_salary).length;
   const ineligibleTrips = trips.length - eligibleTrips;

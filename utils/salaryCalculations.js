@@ -5,27 +5,24 @@ const COMPLETED_TRIP_SQL =
 const SALARY_ELIGIBLE_TRIP_SQL =
   "(t.photo_path IS NOT NULL AND TRIM(t.photo_path) != '')";
 
-const { isUploadFileAvailable } = require('./uploadPaths');
-const { isUploadAvailable } = require('./uploadsStorage');
-
+/**
+ * Зарплата: учитываем рейс, если в БД есть photo_path.
+ * Не проверяем S3 HeadObject — он на Timeweb занимает 10–15с и вешает API.
+ * Факт успешной загрузки = запись пути после PutObject.
+ */
 function isTripSalaryEligible(trip) {
   if (!trip) return false;
   const photoPath = trip.photo_path ? String(trip.photo_path).trim() : '';
-  if (!photoPath) return false;
-  return isUploadFileAvailable(photoPath);
+  return Boolean(photoPath);
 }
 
 async function isTripSalaryEligibleAsync(trip) {
-  if (!trip) return false;
-  const photoPath = trip.photo_path ? String(trip.photo_path).trim() : '';
-  if (!photoPath) return false;
-  return isUploadAvailable(photoPath);
+  return isTripSalaryEligible(trip);
 }
 
 async function isPhotoAvailableAsync(photoPath) {
   const normalized = photoPath ? String(photoPath).trim() : '';
-  if (!normalized) return false;
-  return isUploadAvailable(normalized);
+  return Boolean(normalized);
 }
 
 function asNumber(value) {

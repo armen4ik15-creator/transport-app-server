@@ -1,10 +1,7 @@
 const fs = require('fs');
 const { readS3Env } = require('../config/s3');
-const { uploadBufferToS3, uploadLocalFileToS3, existsOnS3, markUploadAvailable } = require('./uploadsStorage');
+const { uploadBufferToS3, uploadLocalFileToS3, markUploadAvailable } = require('./uploadsStorage');
 const { resolveUploadAbsolutePath } = require('./uploadPaths');
-
-const S3_VERIFY_TIMEOUT_MS = Number(process.env.S3_VERIFY_TIMEOUT_MS) || 5000;
-const S3_VERIFY_RETRIES = Number(process.env.S3_VERIFY_RETRIES) || 2;
 
 /**
  * Фоновое зеркалирование (для некритичных upload-роутов).
@@ -39,19 +36,10 @@ async function mirrorUploadToS3(webPath, { buffer, mimeType, absolutePath } = {}
   }
 }
 
-async function waitForS3Object(webPath) {
-  for (let attempt = 0; attempt < S3_VERIFY_RETRIES; attempt += 1) {
-    const found = await existsOnS3(webPath, S3_VERIFY_TIMEOUT_MS);
-    if (found) return true;
-    if (attempt < S3_VERIFY_RETRIES - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-  }
-  return false;
-}
-
 /**
- * Сохранить файл в S3 и дождаться подтверждения (для фото ТТН).
+ * Сохранить файл в S3 (для фото ТТН).
+ * После успешного PutObject сразу помечаем доступным — без HeadObject
+ * (на Timeweb HEAD занимает 10–15с и роняет весь API).
  */
 async function persistUploadMirror(webPath, options = {}) {
   await mirrorUploadToS3(webPath, options);
@@ -64,7 +52,6 @@ async function persistUploadMirror(webPath, options = {}) {
     return;
   }
 
-  // PutObject уже успешен — не блокируем ответ повторными HEAD (Timeweb S3 может отвечать с задержкой).
   markUploadAvailable(webPath);
 }
 

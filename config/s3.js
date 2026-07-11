@@ -1,8 +1,8 @@
 const { S3Client, ListObjectsV2Command, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { NodeHttpHandler } = require('@smithy/node-http-handler');
 
-const S3_CONNECTION_TIMEOUT_MS = Number(process.env.S3_CONNECTION_TIMEOUT_MS) || 5000;
-const S3_REQUEST_TIMEOUT_MS = Number(process.env.S3_REQUEST_TIMEOUT_MS) || 8000;
+const S3_CONNECTION_TIMEOUT_MS = Number(process.env.S3_CONNECTION_TIMEOUT_MS) || 10000;
+const S3_REQUEST_TIMEOUT_MS = Number(process.env.S3_REQUEST_TIMEOUT_MS) || 30000;
 
 let cachedClient = null;
 let cachedClientKey = null;

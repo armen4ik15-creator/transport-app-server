@@ -122,16 +122,12 @@ router.get('/', async (req, res) => {
   `;
 
   const rows = db.prepare(sql).all(...params, limit, offset);
-  const { isUploadAvailable } = require('../utils/uploadsStorage');
-  const { mapWithConcurrency } = require('../utils/mapWithConcurrency');
-  const enriched = await mapWithConcurrency(
-    rows,
-    async (row) => ({
-      ...row,
-      photo_available: row.file_path ? await isUploadAvailable(row.file_path) : false,
-    }),
-    6
-  );
+  // Не дергаем S3 HeadObject на каждый файл — он занимает 10–15с и роняет API.
+  // Доступность подтверждается при реальной отдаче GET /api/photos/file.
+  const enriched = rows.map((row) => ({
+    ...row,
+    photo_available: Boolean(row.file_path && String(row.file_path).trim()),
+  }));
   return res.json(enriched);
 });
 
