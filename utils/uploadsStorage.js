@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { GetObjectCommand, HeadObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, HeadObjectCommand, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { createS3Client, readS3Env } = require('../config/s3');
 const { resolveUploadAbsolutePath, normalizeUploadWebPath } = require('./uploadPaths');
 
@@ -22,11 +22,16 @@ function guessContentType(filePath) {
 
 async function uploadBufferToS3(webPath, buffer, contentType) {
   const config = readS3Env();
-  if (!config.enabled || !buffer?.length) return false;
+  if (!config.enabled) return false;
+  if (!buffer?.length) {
+    throw new Error('Empty upload buffer');
+  }
 
   const client = createS3Client(config);
   const key = getUploadsObjectKey(webPath);
-  if (!client || !key) return false;
+  if (!client || !key) {
+    throw new Error('S3 client or object key unavailable');
+  }
 
   await client.send(
     new PutObjectCommand({
@@ -114,12 +119,50 @@ async function streamUploadToResponse(webPath, res) {
   return true;
 }
 
+async function deleteFromS3(webPath) {
+  const config = readS3Env();
+  if (!config.enabled) return false;
+
+  const client = createS3Client(config);
+  const key = getUploadsObjectKey(webPath);
+  if (!client || !key) return false;
+
+  try {
+    await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+    return true;
+  } catch (error) {
+    console.warn('[uploads] S3 delete failed:', error.message);
+    return false;
+  }
+}
+
 async function isUploadAvailable(webPath) {
   const normalized = normalizeUploadWebPath(webPath);
   if (!normalized) return false;
+
+  const s3 = readS3Env();
+  if (s3.enabled) {
+    return existsOnS3(normalized);
+  }
+
   const absolute = resolveUploadAbsolutePath(normalized);
-  if (absolute) return true;
-  return existsOnS3(normalized);
+  return Boolean(absolute);
+}
+
+async function deleteStoredUpload(webPath) {
+  const normalized = normalizeUploadWebPath(webPath);
+  if (!normalized) return;
+
+  const absolute = resolveUploadAbsolutePath(normalized);
+  if (absolute) {
+    try {
+      fs.unlinkSync(absolute);
+    } catch {
+      // ignore local delete errors
+    }
+  }
+
+  await deleteFromS3(normalized);
 }
 
 module.exports = {
@@ -127,6 +170,8 @@ module.exports = {
   uploadBufferToS3,
   uploadLocalFileToS3,
   existsOnS3,
+  deleteFromS3,
   streamUploadToResponse,
   isUploadAvailable,
+  deleteStoredUpload,
 };

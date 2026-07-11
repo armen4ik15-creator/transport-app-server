@@ -67,6 +67,22 @@ router.get('/', (_req, res) => {
   return res.json(payload);
 });
 
+router.get('/storage', async (_req, res) => {
+  try {
+    const { getFullStorageHealth } = require('../utils/s3StorageHealth');
+    const report = await getFullStorageHealth();
+    return res.json({
+      status: report.healthy ? 'ok' : 'degraded',
+      ...report,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      error: error.message,
+    });
+  }
+});
+
 /**
  * Временная диагностика привязок устройств для отладки HMAC.
  * Доступна только при HMAC_DEBUG=1 и совпадении ?key= с HMAC_DEBUG_KEY.

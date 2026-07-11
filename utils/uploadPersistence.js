@@ -3,7 +3,8 @@ const { readS3Env } = require('../config/s3');
 const { uploadBufferToS3, uploadLocalFileToS3, existsOnS3 } = require('./uploadsStorage');
 const { resolveUploadAbsolutePath } = require('./uploadPaths');
 
-const S3_VERIFY_TIMEOUT_MS = Number(process.env.S3_VERIFY_TIMEOUT_MS) || 8000;
+const S3_VERIFY_TIMEOUT_MS = Number(process.env.S3_VERIFY_TIMEOUT_MS) || 12000;
+const S3_VERIFY_RETRIES = Number(process.env.S3_VERIFY_RETRIES) || 5;
 
 /**
  * Фоновое зеркалирование (для некритичных upload-роутов).
@@ -15,39 +16,58 @@ function queueUploadMirror(webPath, options = {}) {
 }
 
 async function mirrorUploadToS3(webPath, { buffer, mimeType, absolutePath } = {}) {
-  if (buffer?.length) {
-    try {
-      const uploaded = await uploadBufferToS3(webPath, buffer, mimeType);
-      if (uploaded) return;
-    } catch (error) {
-      console.warn('[uploads] S3 buffer upload failed:', error.message);
-    }
+  const s3 = readS3Env();
+
+  if (buffer?.length && s3.enabled) {
+    await uploadBufferToS3(webPath, buffer, mimeType);
+    return;
   }
 
   const localPath = absolutePath || resolveUploadAbsolutePath(webPath);
-  if (!localPath || !fs.existsSync(localPath)) return;
-
-  try {
-    await uploadLocalFileToS3(webPath, localPath);
-  } catch (error) {
-    console.warn('[uploads] S3 file mirror failed:', error.message);
+  if (!localPath || !fs.existsSync(localPath)) {
+    if (s3.enabled) {
+      throw new Error('Локальный файл не найден для загрузки в S3');
+    }
+    return;
   }
+
+  if (s3.enabled) {
+    const uploaded = await uploadLocalFileToS3(webPath, localPath);
+    if (!uploaded) {
+      throw new Error('Не удалось загрузить файл в S3');
+    }
+  }
+}
+
+async function waitForS3Object(webPath) {
+  for (let attempt = 0; attempt < S3_VERIFY_RETRIES; attempt += 1) {
+    const found = await existsOnS3(webPath, S3_VERIFY_TIMEOUT_MS);
+    if (found) return true;
+    if (attempt < S3_VERIFY_RETRIES - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+  }
+  return false;
 }
 
 /**
  * Сохранить файл в S3 и дождаться подтверждения (для фото ТТН).
- * Без S3 — только локальный диск (ephemeral на Timeweb).
  */
 async function persistUploadMirror(webPath, options = {}) {
   await mirrorUploadToS3(webPath, options);
 
   const s3 = readS3Env();
-  if (!s3.enabled) return;
+  if (!s3.enabled) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('[uploads] S3 не настроен — файлы будут потеряны при redeploy');
+    }
+    return;
+  }
 
-  const onS3 = await existsOnS3(webPath, S3_VERIFY_TIMEOUT_MS);
+  const onS3 = await waitForS3Object(webPath);
   if (!onS3) {
     throw new Error(
-      'Фото не сохранилось в постоянное хранилище S3. Проверьте интернет и повторите загрузку.'
+      'Фото не сохранилось в S3. Проверьте интернет и повторите загрузку.'
     );
   }
 }

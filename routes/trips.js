@@ -6,7 +6,7 @@ const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { isUploadFileAvailable } = require('../utils/uploadPaths');
-const { existsOnS3 } = require('../utils/uploadsStorage');
+const { deleteStoredUpload, isUploadAvailable } = require('../utils/uploadsStorage');
 const { persistUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
@@ -141,6 +141,11 @@ function unlinkStoredUpload(filePath) {
   }
 }
 
+async function removeStoredUpload(filePath) {
+  if (!filePath) return;
+  await deleteStoredUpload(filePath);
+}
+
 function isTripLoading(trip) {
   return trip.status === 'loading' || (trip.status == null && trip.stage === 'loading');
 }
@@ -170,7 +175,9 @@ function findDuplicateTtn(ttnNumber, excludeTripId = null) {
 
 function deleteTripPhotoFiles(trip) {
   if (trip.photo_path) {
-    unlinkStoredUpload(trip.photo_path);
+    void deleteStoredUpload(trip.photo_path).catch((error) => {
+      console.warn('[trips] photo delete failed:', error.message);
+    });
   }
 }
 
@@ -185,10 +192,7 @@ async function enrichTripRowAsync(row) {
   if (!row) return row;
   const photoPath = row.photo_path ? String(row.photo_path).trim() : '';
   if (!photoPath) return { ...row, photo_available: false };
-  if (isUploadFileAvailable(photoPath)) {
-    return { ...row, photo_available: true };
-  }
-  const photoAvailable = await existsOnS3(photoPath);
+  const photoAvailable = await isUploadAvailable(photoPath);
   return { ...row, photo_available: photoAvailable };
 }
 
@@ -271,7 +275,7 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
   }
 
   if (trip.photo_path) {
-    unlinkStoredUpload(trip.photo_path);
+    await removeStoredUpload(trip.photo_path);
   }
 
   const ext = extensionFromMime(mimeType);
@@ -641,7 +645,7 @@ router.delete('/:id/photo', async (req, res) => {
     return res.status(400).json({ error: 'У рейса нет прикреплённого фото' });
   }
 
-  unlinkStoredUpload(trip.photo_path);
+  await removeStoredUpload(trip.photo_path);
   db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
 
   console.log('[trips][photo-delete]', { id, userId: req.user?.id ?? null });
