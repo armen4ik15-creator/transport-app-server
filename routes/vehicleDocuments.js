@@ -5,6 +5,7 @@ const multer = require('multer');
 const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadsSubdir } = require('../config/paths');
+const { queueUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -90,6 +91,7 @@ router.post('/', requireRole('admin'), upload.single('file'), (req, res) => {
   }
 
   const relativePath = `/uploads/vehicle-documents/${path.basename(req.file.path)}`;
+  queueUploadMirror(relativePath, { absolutePath: req.file.path, mimeType: req.file.mimetype });
   const result = db
     .prepare(
       `INSERT INTO vehicle_documents (vehicle_id, doc_type, file_path, created_by)

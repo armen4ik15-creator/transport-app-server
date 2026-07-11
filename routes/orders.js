@@ -5,6 +5,7 @@ const multer = require('multer');
 const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadsSubdir } = require('../config/paths');
+const { queueUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
 
@@ -351,6 +352,7 @@ router.post('/:id/photos', upload.single('photo'), (req, res) => {
     return;
   }
   const filePath = `/uploads/orders/${req.file.filename}`;
+  queueUploadMirror(filePath, { absolutePath: req.file.path, mimeType: req.file.mimetype });
   const r = db
     .prepare('INSERT INTO order_photos (order_id, file_path, uploaded_by) VALUES (?, ?, ?)')
     .run(id, filePath, req.user.id);

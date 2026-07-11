@@ -6,7 +6,8 @@ const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { isUploadFileAvailable } = require('../utils/uploadPaths');
-const { uploadBufferToS3, uploadLocalFileToS3, existsOnS3 } = require('../utils/uploadsStorage');
+const { existsOnS3 } = require('../utils/uploadsStorage');
+const { queueUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
 
@@ -208,31 +209,6 @@ async function mapTripsWithPhotoAvailability(rows, concurrency = 4) {
   return enriched;
 }
 
-function queueTripPhotoS3Mirror(webPath, buffer, mimeType) {
-  void mirrorTripPhotoToS3(webPath, buffer, mimeType).catch((error) => {
-    console.warn('[uploads] S3 background mirror failed:', error.message);
-  });
-}
-
-async function mirrorTripPhotoToS3(webPath, buffer, mimeType) {
-  if (buffer?.length) {
-    try {
-      const uploaded = await uploadBufferToS3(webPath, buffer, mimeType);
-      if (uploaded) return;
-    } catch (error) {
-      console.warn('[uploads] S3 buffer upload failed:', error.message);
-    }
-  }
-
-  const absolute = require('../utils/uploadPaths').resolveUploadAbsolutePath(webPath);
-  if (!absolute) return;
-  try {
-    await uploadLocalFileToS3(webPath, absolute);
-  } catch (error) {
-    console.warn('[uploads] S3 mirror failed:', error.message);
-  }
-}
-
 function extensionFromMime(mimeType) {
   const mime = String(mimeType || '').toLowerCase();
   if (mime.includes('png')) return '.png';
@@ -305,7 +281,7 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
 
   const filePath = `/uploads/trips/${filename}`;
   db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
-  queueTripPhotoS3Mirror(filePath, buffer, mimeType);
+  queueUploadMirror(filePath, { buffer, mimeType });
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
   return res.json(enrichTripRow(updatedTrip));
@@ -494,7 +470,10 @@ router.post('/', (req, res, next) => {
       if (req.file?.path && fs.existsSync(req.file.path)) {
         buffer = fs.readFileSync(req.file.path);
       }
-      queueTripPhotoS3Mirror(filePath, buffer, req.file?.mimetype || 'image/jpeg');
+      queueUploadMirror(filePath, {
+        buffer,
+        mimeType: req.file?.mimetype || 'image/jpeg',
+      });
     }
     return res.status(201).json(enrichTripRow(trip));
   }
@@ -547,7 +526,10 @@ router.post('/', (req, res, next) => {
     if (req.file?.path && fs.existsSync(req.file.path)) {
       buffer = fs.readFileSync(req.file.path);
     }
-    queueTripPhotoS3Mirror(filePath, buffer, req.file?.mimetype || 'image/jpeg');
+    queueUploadMirror(filePath, {
+      buffer,
+      mimeType: req.file?.mimetype || 'image/jpeg',
+    });
   }
   return res.json(enrichTripRow(trip));
 });

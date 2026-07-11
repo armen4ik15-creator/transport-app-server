@@ -5,12 +5,17 @@ const path = require('path');
 const express = require('express');
 const compression = require('compression');
 const cors = require('cors');
-const { UPLOADS_DIR, ensureDataStorage } = require('./config/paths');
+const { UPLOADS_DIR, ensureDataStorage, getUploadDirHealth } = require('./config/paths');
 const { ensureStorageDirectories } = require('./config/storage');
 const { APP_DOWNLOADS_DIR, APK_FILENAME } = require('./routes/publicApp');
 
 ensureDataStorage();
 ensureStorageDirectories();
+
+const uploadHealth = getUploadDirHealth();
+console.log(
+  `[storage] uploads=${uploadHealth.upload_dir} exists=${uploadHealth.upload_dir_exists} writable=${uploadHealth.upload_dir_writable} persistent=${uploadHealth.persistent_volume}`
+);
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);

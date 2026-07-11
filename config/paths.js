@@ -2,26 +2,65 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-function resolveDataDir() {
-  const candidates = [];
-  if (process.env.DATA_DIR) {
-    candidates.push(path.resolve(process.env.DATA_DIR));
-  }
-  candidates.push('/data');
-  candidates.push(path.join(__dirname, '..', 'data'));
-  candidates.push(path.join(os.tmpdir(), 'reestrpro-data'));
+function ensureWritableDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.accessSync(dir, fs.constants.W_OK);
+  return dir;
+}
 
-  for (const dir of candidates) {
+function tryWritableDir(dir) {
+  try {
+    return ensureWritableDir(dir);
+  } catch {
+    return null;
+  }
+}
+
+function isEphemeralPath(dir) {
+  const normalized = path.resolve(dir);
+  const tmpRoot = path.resolve(os.tmpdir());
+  return normalized.startsWith(tmpRoot) || normalized.includes('/tmp/');
+}
+
+function resolveDataDir() {
+  const explicit = process.env.DATA_DIR?.trim();
+  if (explicit) {
+    const resolved = path.resolve(explicit);
     try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.accessSync(dir, fs.constants.W_OK);
-      return dir;
-    } catch {
-      // try next candidate
+      return ensureWritableDir(resolved);
+    } catch (error) {
+      const message = `[storage] DATA_DIR=${resolved} недоступен для записи: ${error.message}`;
+      if (process.env.NODE_ENV === 'production') {
+        console.error(message);
+        throw new Error(message);
+      }
+      console.warn(`${message} — dev fallback`);
     }
   }
 
-  return path.join(os.tmpdir(), 'reestrpro-data');
+  const candidates = [
+    '/data',
+    path.join(__dirname, '..', 'data'),
+    path.join(os.tmpdir(), 'reestrpro-data'),
+  ];
+
+  for (const candidate of candidates) {
+    const dir = tryWritableDir(candidate);
+    if (dir) {
+      if (isEphemeralPath(dir)) {
+        console.warn(
+          `[storage] Используется временный диск ${dir}. При redeploy файлы пропадут — смонтируйте Volume на /data и задайте DATA_DIR=/data.`
+        );
+      } else {
+        console.log(`[storage] Постоянное хранилище: ${dir}`);
+      }
+      return dir;
+    }
+  }
+
+  const fallback = path.join(os.tmpdir(), 'reestrpro-data');
+  console.warn(`[storage] Fallback на временный диск: ${fallback}`);
+  return ensureWritableDir(fallback);
 }
 
 const DATA_DIR = resolveDataDir();
@@ -29,6 +68,7 @@ const DB_PATH = path.join(DATA_DIR, 'database.sqlite');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const LEGACY_DB_PATH = path.join(__dirname, '..', 'data.sqlite');
 const LEGACY_UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+const EPHEMERAL_DATA_DIR = isEphemeralPath(DATA_DIR);
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -65,10 +105,38 @@ function uploadsSubdir(name) {
   return dir;
 }
 
+function getUploadDirHealth() {
+  let exists = false;
+  let writable = false;
+
+  try {
+    exists = fs.existsSync(UPLOADS_DIR);
+    if (exists) {
+      const probe = path.join(UPLOADS_DIR, `.write-probe-${process.pid}`);
+      fs.writeFileSync(probe, String(Date.now()));
+      fs.unlinkSync(probe);
+      writable = true;
+    }
+  } catch {
+    exists = fs.existsSync(UPLOADS_DIR);
+    writable = false;
+  }
+
+  return {
+    upload_dir: UPLOADS_DIR,
+    upload_dir_exists: exists,
+    upload_dir_writable: writable,
+    persistent_volume: !EPHEMERAL_DATA_DIR,
+  };
+}
+
 module.exports = {
   DATA_DIR,
   DB_PATH,
   UPLOADS_DIR,
+  EPHEMERAL_DATA_DIR,
   ensureDataStorage,
   uploadsSubdir,
+  getUploadDirHealth,
+  isEphemeralPath,
 };

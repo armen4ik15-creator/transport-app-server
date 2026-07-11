@@ -5,6 +5,7 @@ const multer = require('multer');
 const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadsSubdir } = require('../config/paths');
+const { queueUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -168,6 +169,9 @@ router.post('/', upload.single('photo'), (req, res) => {
   }
 
   const photoPath = req.file ? `/uploads/expenses/${req.file.filename}` : null;
+  if (photoPath && req.file) {
+    queueUploadMirror(photoPath, { absolutePath: req.file.path, mimeType: req.file.mimetype });
+  }
   const safeMethod = isDriver ? null : method || null;
   const timestamp = nowIso();
 

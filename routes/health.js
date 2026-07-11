@@ -18,12 +18,17 @@ router.get('/live', (_req, res) => {
 
 router.get('/', (_req, res) => {
   const env = getPostgresEnvDiagnostics();
+  const storage = getStorageHealth();
   const payload = {
     status: 'ok',
     app_version: process.env.APP_VERSION || '1.2.1',
     db_kind: db.kind || 'sqlite',
     data_dir: DATA_DIR,
-    storage: getStorageHealth(),
+    upload_dir: storage.upload_dir,
+    upload_dir_exists: storage.upload_dir_exists,
+    upload_dir_writable: storage.upload_dir_writable,
+    persistent_volume: storage.persistent_volume,
+    storage,
     env,
   };
 

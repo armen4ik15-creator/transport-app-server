@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { DATA_DIR, UPLOADS_DIR } = require('../config/paths');
+const { DATA_DIR, UPLOADS_DIR, getUploadDirHealth } = require('../config/paths');
 const { getBackupConfig } = require('../services/backup/backupConfig');
 const { countFilesRecursive, getDirectorySizeBytes } = require('../services/backup/backupArchiver');
 const { readS3Env } = require('../config/s3');
@@ -51,7 +51,10 @@ function getStorageHealth() {
     warnings.push('Локальных ZIP-бэкапов нет — запустите POST /api/backups/run');
   }
 
+  const uploadHealth = getUploadDirHealth();
+
   return {
+    ...uploadHealth,
     data_dir: DATA_DIR,
     data_dir_writable: dataDirWritable,
     uploads_dir: UPLOADS_DIR,

@@ -108,7 +108,7 @@ async function main() {
       DATABASE_SSL: 'false',
       DB_FALLBACK_HOSTS: '',
       PORT: '3000',
-      DATA_DIR: './data',
+      DATA_DIR: '/data',
     },
     network: {
       id: PRIVATE_NETWORK_ID,

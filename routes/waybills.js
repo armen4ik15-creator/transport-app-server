@@ -6,6 +6,7 @@ const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 const { uploadsSubdir } = require('../config/paths');
+const { queueUploadMirror } = require('../utils/uploadPersistence');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -78,6 +79,9 @@ router.post('/', upload.single('file'), (req, res) => {
     return res.status(403).json({ error: 'Недостаточно прав' });
   }
   const filePath = req.file ? `/uploads/waybills/${req.file.filename}` : null;
+  if (filePath && req.file) {
+    queueUploadMirror(filePath, { absolutePath: req.file.path, mimeType: req.file.mimetype });
+  }
   const result = db
     .prepare(
       `INSERT INTO waybills (order_id, number, date, file_path, created_by)
@@ -108,6 +112,9 @@ router.put('/:id', upload.single('file'), (req, res) => {
   }
   const { number, date } = req.body || {};
   const nextFilePath = req.file ? `/uploads/waybills/${req.file.filename}` : null;
+  if (nextFilePath && req.file) {
+    queueUploadMirror(nextFilePath, { absolutePath: req.file.path, mimeType: req.file.mimetype });
+  }
   db.prepare(
     `UPDATE waybills
      SET number = COALESCE(?, number),
