@@ -5,6 +5,7 @@ const {
   calcDriverCompensations,
   calcDriverDeductions,
   calcDriverTripAccrued,
+  calcDriverTripAccruedAsync,
   parseIsoDate,
   resolvePaymentPeriod,
 } = require('../utils/salaryCalculations');
@@ -59,7 +60,7 @@ router.get('/payments', (req, res) => {
   return res.json(rows);
 });
 
-router.get('/accrued', (req, res) => {
+router.get('/accrued', async (req, res) => {
   const driverId = Number(req.query.driver_id);
   const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
   const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
@@ -74,7 +75,7 @@ router.get('/accrued', (req, res) => {
   const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
   if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
 
-  const accrued = calcDriverTripAccrued(db, driverId, from, to);
+  const accrued = await calcDriverTripAccruedAsync(db, driverId, from, to);
   const compensations = calcDriverCompensations(db, driverId, from, to);
   const deductions = calcDriverDeductions(db, driverId, from, to);
 
@@ -144,7 +145,7 @@ router.delete('/payments/:id', (req, res) => {
   return res.json({ ok: true });
 });
 
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   const driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
   const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
   const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
@@ -159,7 +160,7 @@ router.get('/summary', (req, res) => {
   const periodStart = from ?? '1970-01-01';
   const periodEnd = to ?? '2099-12-31';
 
-  const grossTrips = calcDriverTripAccrued(db, driverId, periodStart, periodEnd);
+  const grossTrips = await calcDriverTripAccruedAsync(db, driverId, periodStart, periodEnd);
   const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
   const gross = grossTrips + compensations;
   const deducted = calcDriverDeductions(db, driverId, periodStart, periodEnd);
@@ -189,7 +190,7 @@ router.get('/summary', (req, res) => {
   });
 });
 
-router.get('/debts', (_req, res) => {
+router.get('/debts', async (_req, res) => {
   const drivers = db
     .prepare(
       `SELECT d.id AS driver_id, u.full_name AS driver_name, d.car_number AS driver_car_number
@@ -199,38 +200,40 @@ router.get('/debts', (_req, res) => {
     )
     .all();
 
-  const rows = drivers.map((driver) => {
-    const grossTrips = calcDriverTripAccrued(db, driver.driver_id, '1970-01-01', '2099-12-31');
-    const compensations = calcDriverCompensations(
-      db,
-      driver.driver_id,
-      '1970-01-01',
-      '2099-12-31'
-    );
-    const gross = grossTrips + compensations;
-    const deducted = calcDriverDeductions(db, driver.driver_id, '1970-01-01', '2099-12-31');
-    const payments = db
-      .prepare(
-        `SELECT COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
-         FROM driver_payments
-         WHERE driver_id = ?`
-      )
-      .get(driver.driver_id);
-    const paid = Number(payments.paid || 0);
-    const debt = gross + deducted - paid;
+  const rows = await Promise.all(
+    drivers.map(async (driver) => {
+      const grossTrips = await calcDriverTripAccruedAsync(db, driver.driver_id, '1970-01-01', '2099-12-31');
+      const compensations = calcDriverCompensations(
+        db,
+        driver.driver_id,
+        '1970-01-01',
+        '2099-12-31'
+      );
+      const gross = grossTrips + compensations;
+      const deducted = calcDriverDeductions(db, driver.driver_id, '1970-01-01', '2099-12-31');
+      const payments = db
+        .prepare(
+          `SELECT COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
+           FROM driver_payments
+           WHERE driver_id = ?`
+        )
+        .get(driver.driver_id);
+      const paid = Number(payments.paid || 0);
+      const debt = gross + deducted - paid;
 
-    return {
-      driver_id: driver.driver_id,
-      driver_name: driver.driver_name,
-      driver_car_number: driver.driver_car_number,
-      gross,
-      gross_trips: grossTrips,
-      compensations,
+      return {
+        driver_id: driver.driver_id,
+        driver_name: driver.driver_name,
+        driver_car_number: driver.driver_car_number,
+        gross,
+        gross_trips: grossTrips,
+        compensations,
       paid,
       deducted,
       debt,
     };
-  });
+    })
+  );
 
   rows.sort((a, b) => b.debt - a.debt || String(a.driver_name).localeCompare(String(b.driver_name)));
   return res.json(rows);

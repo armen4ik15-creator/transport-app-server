@@ -20,6 +20,25 @@ function guessContentType(filePath) {
   return 'image/jpeg';
 }
 
+async function uploadBufferToS3(webPath, buffer, contentType) {
+  const config = readS3Env();
+  if (!config.enabled || !buffer?.length) return false;
+
+  const client = createS3Client(config);
+  const key = getUploadsObjectKey(webPath);
+  if (!client || !key) return false;
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType || guessContentType(webPath),
+    })
+  );
+  return true;
+}
+
 async function uploadLocalFileToS3(webPath, absolutePath) {
   const config = readS3Env();
   if (!config.enabled || !fs.existsSync(absolutePath)) return false;
@@ -95,6 +114,7 @@ async function isUploadAvailable(webPath) {
 
 module.exports = {
   getUploadsObjectKey,
+  uploadBufferToS3,
   uploadLocalFileToS3,
   existsOnS3,
   streamUploadToResponse,

@@ -6,12 +6,26 @@ const SALARY_ELIGIBLE_TRIP_SQL =
   "(t.photo_path IS NOT NULL AND TRIM(t.photo_path) != '')";
 
 const { isUploadFileAvailable } = require('./uploadPaths');
+const { isUploadAvailable } = require('./uploadsStorage');
 
 function isTripSalaryEligible(trip) {
   if (!trip) return false;
   const photoPath = trip.photo_path ? String(trip.photo_path).trim() : '';
   if (!photoPath) return false;
   return isUploadFileAvailable(photoPath);
+}
+
+async function isTripSalaryEligibleAsync(trip) {
+  if (!trip) return false;
+  const photoPath = trip.photo_path ? String(trip.photo_path).trim() : '';
+  if (!photoPath) return false;
+  return isUploadAvailable(photoPath);
+}
+
+async function isPhotoAvailableAsync(photoPath) {
+  const normalized = photoPath ? String(photoPath).trim() : '';
+  if (!normalized) return false;
+  return isUploadAvailable(normalized);
 }
 
 function asNumber(value) {
@@ -43,6 +57,35 @@ function calcDriverTripAccrued(db, driverId, dateFrom, dateTo) {
     (sum, row) => sum + (isTripSalaryEligible(row) ? asNumber(row.driver_rate) : 0),
     0
   );
+}
+
+async function calcDriverTripAccruedAsync(db, driverId, dateFrom, dateTo) {
+  if (!driverId || !dateFrom || !dateTo) return 0;
+
+  const where = [COMPLETED_TRIP_SQL, 't.driver_id = ?'];
+  const params = [driverId];
+
+  where.push('date(COALESCE(t.completed_at, t.created_at)) >= date(?)');
+  params.push(dateFrom);
+  where.push('date(COALESCE(t.completed_at, t.created_at)) <= date(?)');
+  params.push(dateTo);
+
+  const rows = db
+    .prepare(
+      `SELECT t.photo_path, COALESCE(o.driver_rate, 0) AS driver_rate
+       FROM trips t
+       JOIN orders o ON o.id = t.order_id
+       WHERE ${where.join(' AND ')}`
+    )
+    .all(...params);
+
+  let total = 0;
+  for (const row of rows) {
+    if (await isTripSalaryEligibleAsync(row)) {
+      total += asNumber(row.driver_rate);
+    }
+  }
+  return total;
 }
 
 function calcDriverDeductions(db, driverId, dateFrom, dateTo) {
@@ -192,8 +235,11 @@ module.exports = {
   COMPLETED_TRIP_SQL,
   SALARY_ELIGIBLE_TRIP_SQL,
   isTripSalaryEligible,
+  isTripSalaryEligibleAsync,
+  isPhotoAvailableAsync,
   asNumber,
   calcDriverTripAccrued,
+  calcDriverTripAccruedAsync,
   calcDriverCompensations,
   calcDriverDeductions,
   calcDriverPayouts,

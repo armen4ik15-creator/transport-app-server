@@ -4,9 +4,8 @@ const { authMiddleware } = require('../middleware/auth');
 const {
   calcDriverCompensations,
   COMPLETED_TRIP_SQL,
-  isTripSalaryEligible,
+  isPhotoAvailableAsync,
 } = require('../utils/salaryCalculations');
-const { isUploadFileAvailable } = require('../utils/uploadPaths');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -81,7 +80,7 @@ function buildTripFilters(driverId, from, to) {
   return { where, params };
 }
 
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
   let driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
@@ -166,21 +165,24 @@ router.get('/summary', (req, res) => {
 
   const expenseStats = buildExpenseStats(driverId, from, to);
 
-  const trips = tripRows.map((row) => {
-    const countedInSalary = isTripSalaryEligible(row);
-    return {
-      id: Number(row.id),
-      order_id: Number(row.order_id),
-      ttn_number: row.ttn_number ?? null,
-      volume: row.volume == null ? null : Number(row.volume),
-      created_at: row.created_at,
-      completed_at: row.completed_at ?? null,
-      driver_rate: Number(row.driver_rate || 0),
-      has_photos: countedInSalary,
-      counted_in_salary: countedInSalary,
-      photo_available: row.photo_path ? isUploadFileAvailable(row.photo_path) : false,
-    };
-  });
+  const trips = await Promise.all(
+    tripRows.map(async (row) => {
+      const photoAvailable = row.photo_path ? await isPhotoAvailableAsync(row.photo_path) : false;
+      const countedInSalary = photoAvailable;
+      return {
+        id: Number(row.id),
+        order_id: Number(row.order_id),
+        ttn_number: row.ttn_number ?? null,
+        volume: row.volume == null ? null : Number(row.volume),
+        created_at: row.created_at,
+        completed_at: row.completed_at ?? null,
+        driver_rate: Number(row.driver_rate || 0),
+        has_photos: countedInSalary,
+        counted_in_salary: countedInSalary,
+        photo_available: photoAvailable,
+      };
+    })
+  );
 
   const eligibleTrips = trips.filter((trip) => trip.counted_in_salary).length;
   const ineligibleTrips = trips.length - eligibleTrips;

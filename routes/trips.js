@@ -6,7 +6,7 @@ const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { isUploadFileAvailable } = require('../utils/uploadPaths');
-const { uploadLocalFileToS3, existsOnS3 } = require('../utils/uploadsStorage');
+const { uploadBufferToS3, uploadLocalFileToS3, existsOnS3 } = require('../utils/uploadsStorage');
 
 const router = express.Router();
 
@@ -189,7 +189,16 @@ async function enrichTripRowAsync(row) {
   return { ...row, photo_available: photoAvailable };
 }
 
-async function mirrorTripPhotoToS3(webPath) {
+async function mirrorTripPhotoToS3(webPath, buffer, mimeType) {
+  if (buffer?.length) {
+    try {
+      const uploaded = await uploadBufferToS3(webPath, buffer, mimeType);
+      if (uploaded) return;
+    } catch (error) {
+      console.warn('[uploads] S3 buffer upload failed:', error.message);
+    }
+  }
+
   const absolute = require('../utils/uploadPaths').resolveUploadAbsolutePath(webPath);
   if (!absolute) return;
   try {
@@ -271,7 +280,7 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
 
   const filePath = `/uploads/trips/${filename}`;
   db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
-  await mirrorTripPhotoToS3(filePath);
+  await mirrorTripPhotoToS3(filePath, buffer, mimeType);
 
   const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
   return res.json(await enrichTripRowAsync(updatedTrip));
@@ -379,7 +388,7 @@ router.post('/', (req, res, next) => {
     return handlePhotoUpload(req, res, next);
   }
   next();
-}, (req, res) => {
+}, async (req, res) => {
   const action = resolveAction(req.body);
   const { order_id, ttn_number, volume, note } = req.body || {};
   const orderId = Number(order_id);
@@ -455,7 +464,14 @@ router.post('/', (req, res, next) => {
       );
 
     const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(result.lastInsertRowid);
-    return res.status(201).json(trip);
+    if (filePath) {
+      let buffer = null;
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        buffer = fs.readFileSync(req.file.path);
+      }
+      await mirrorTripPhotoToS3(filePath, buffer, req.file?.mimetype || 'image/jpeg');
+    }
+    return res.status(201).json(await enrichTripRowAsync(trip));
   }
 
   const activeTrip = db
@@ -501,7 +517,14 @@ router.post('/', (req, res, next) => {
   ).run(trimmedTtn, parsedVolume, trimmedNote, filePath, activeTrip.id);
 
   const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(activeTrip.id);
-  return res.json(enrichTripRow(trip));
+  if (filePath) {
+    let buffer = null;
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      buffer = fs.readFileSync(req.file.path);
+    }
+    await mirrorTripPhotoToS3(filePath, buffer, req.file?.mimetype || 'image/jpeg');
+  }
+  return res.json(await enrichTripRowAsync(trip));
 });
 
 router.post('/:id/photo-data', async (req, res) => {
