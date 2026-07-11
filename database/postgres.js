@@ -73,6 +73,11 @@ function createDbFacade(pool) {
     prepare(sql) {
       return createStatement(pool, sql);
     },
+    async queryAsync(sql, params = []) {
+      const pgSql = normalizeSqlForPostgres(sql);
+      const res = await pool.query(pgSql, params);
+      return res;
+    },
     transaction(fn) {
       const client = waitPromise(pool.connect());
       txClient = client;

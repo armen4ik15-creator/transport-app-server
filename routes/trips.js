@@ -279,7 +279,12 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
   }
 
   try {
-    db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
+    // Async query — не через deasync, иначе после await S3 UPDATE часто зависает.
+    if (typeof db.queryAsync === 'function') {
+      await db.queryAsync('UPDATE trips SET photo_path = ? WHERE id = ?', [filePath, id]);
+    } else {
+      db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
+    }
   } catch (error) {
     console.error('[trips][photo] DB update failed:', error.message);
     unlinkStoredUpload(filePath);
@@ -289,14 +294,25 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
     });
   }
 
-  // Старое фото чистим в фоне — await DeleteObject раньше блокировал API на десятки секунд.
   if (previousPhotoPath && previousPhotoPath !== filePath) {
     void removeStoredUpload(previousPhotoPath).catch((error) => {
       console.warn('[trips][photo] old file cleanup failed:', error.message);
     });
   }
 
-  const updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
+  let updatedTrip;
+  try {
+    if (typeof db.queryAsync === 'function') {
+      const result = await db.queryAsync(`${TRIP_SELECT} WHERE t.id = ?`, [id]);
+      updatedTrip = result.rows?.[0] || null;
+    } else {
+      updatedTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
+    }
+  } catch (error) {
+    console.warn('[trips][photo] reload after upload failed:', error.message);
+    updatedTrip = { id, photo_path: filePath };
+  }
+
   return res.json({ ...updatedTrip, photo_available: true });
 }
 
