@@ -110,11 +110,20 @@ router.get('/', async (req, res) => {
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const source = req.query.source ? String(req.query.source) : null;
+
+  let innerSelect;
+  if (source === 'trip') {
+    innerSelect = TRIP_PHOTOS_SELECT;
+  } else if (source === 'order') {
+    innerSelect = ORDER_PHOTOS_SELECT;
+  } else {
+    innerSelect = `${ORDER_PHOTOS_SELECT}\n      UNION ALL\n      ${TRIP_PHOTOS_SELECT}`;
+  }
+
   const sql = `
     SELECT * FROM (
-      ${ORDER_PHOTOS_SELECT}
-      UNION ALL
-      ${TRIP_PHOTOS_SELECT}
+      ${innerSelect}
     ) AS all_photos
     ${whereClause}
     ORDER BY uploaded_at DESC

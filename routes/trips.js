@@ -663,15 +663,25 @@ router.delete('/:id/photo', async (req, res) => {
   }
 
   const photoPath = String(trip.photo_path).trim();
+
+  // Сначала обнуляем путь в БД (async — не через deasync после await),
+  // затем чистим файл в фоне. Раньше await S3-delete + sync UPDATE вешали запрос.
   try {
-    await removeStoredUpload(photoPath);
+    if (typeof db.queryAsync === 'function') {
+      await db.queryAsync('UPDATE trips SET photo_path = NULL WHERE id = ?', [id]);
+    } else {
+      db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
+    }
   } catch (error) {
-    console.warn('[trips][photo-delete] storage cleanup failed:', error.message);
+    console.error('[trips][photo-delete] DB update failed:', error.message);
+    return res.status(503).json({ error: 'Не удалось удалить фото. Повторите попытку.' });
   }
 
   const { invalidateUploadAvailability } = require('../utils/uploadAvailabilityCache');
   invalidateUploadAvailability(photoPath);
-  db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
+  void removeStoredUpload(photoPath).catch((error) => {
+    console.warn('[trips][photo-delete] storage cleanup failed:', error.message);
+  });
 
   console.log('[trips][photo-delete]', { id, userId: req.user?.id ?? null });
   return res.json({ success: true, message: 'Фото удалено' });
