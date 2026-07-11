@@ -259,28 +259,40 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
     return res.status(access.error.status).json({ error: access.error.message });
   }
 
-  if (trip.photo_path) {
-    await removeStoredUpload(trip.photo_path);
-  }
-
+  const previousPhotoPath = trip.photo_path ? String(trip.photo_path).trim() : null;
   const ext = extensionFromMime(mimeType);
   const filename = `trip_${Date.now()}${ext}`;
   const absolutePath = path.join(TRIPS_UPLOAD_DIR, filename);
-  await fs.promises.writeFile(absolutePath, buffer);
-
   const filePath = `/uploads/trips/${filename}`;
-  db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
 
   try {
+    await fs.promises.writeFile(absolutePath, buffer);
     await persistUploadMirror(filePath, { buffer, mimeType });
   } catch (error) {
     console.error('[trips][photo] S3 persist failed:', error.message);
-    db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(id);
     unlinkStoredUpload(filePath);
     return res.status(503).json({
       error:
         error.message ||
         'Не удалось сохранить фото в S3. Повторите загрузку через минуту.',
+    });
+  }
+
+  try {
+    db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(filePath, id);
+  } catch (error) {
+    console.error('[trips][photo] DB update failed:', error.message);
+    unlinkStoredUpload(filePath);
+    void removeStoredUpload(filePath).catch(() => undefined);
+    return res.status(503).json({
+      error: 'Фото сохранено в S3, но не записалось в базу. Повторите загрузку.',
+    });
+  }
+
+  // Старое фото чистим в фоне — await DeleteObject раньше блокировал API на десятки секунд.
+  if (previousPhotoPath && previousPhotoPath !== filePath) {
+    void removeStoredUpload(previousPhotoPath).catch((error) => {
+      console.warn('[trips][photo] old file cleanup failed:', error.message);
     });
   }
 

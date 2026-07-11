@@ -180,13 +180,22 @@ async function deleteFromS3(webPath) {
   const key = getUploadsObjectKey(webPath);
   if (!client || !key) return false;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(process.env.S3_DELETE_TIMEOUT_MS) || 5000);
+
   try {
-    await sendS3Command(client, new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+    await sendS3Command(
+      client,
+      new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: controller.signal }
+    );
     invalidateUploadAvailability(webPath);
     return true;
   } catch (error) {
     console.warn('[uploads] S3 delete failed:', error.message);
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
