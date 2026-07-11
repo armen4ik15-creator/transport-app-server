@@ -26,16 +26,20 @@ function resolveDataDir() {
   const explicit = process.env.DATA_DIR?.trim();
   if (explicit) {
     const resolved = path.resolve(explicit);
-    try {
-      return ensureWritableDir(resolved);
-    } catch (error) {
-      const message = `[storage] DATA_DIR=${resolved} недоступен для записи: ${error.message}`;
-      if (process.env.NODE_ENV === 'production') {
-        console.error(message);
-        throw new Error(message);
+    const dir = tryWritableDir(resolved);
+    if (dir) {
+      if (isEphemeralPath(dir)) {
+        console.warn(
+          `[storage] DATA_DIR=${resolved} указывает на временный диск. Файлы пропадут при redeploy — используйте S3.`
+        );
+      } else {
+        console.log(`[storage] Постоянное хранилище: ${dir}`);
       }
-      console.warn(`${message} — dev fallback`);
+      return dir;
     }
+    console.error(
+      `[storage] DATA_DIR=${resolved} недоступен для записи — fallback на tmp. Настройте S3 для сохранности файлов.`
+    );
   }
 
   const candidates = [
@@ -49,7 +53,7 @@ function resolveDataDir() {
     if (dir) {
       if (isEphemeralPath(dir)) {
         console.warn(
-          `[storage] Используется временный диск ${dir}. При redeploy файлы пропадут — смонтируйте Volume на /data и задайте DATA_DIR=/data.`
+          `[storage] Используется временный диск ${dir}. При redeploy файлы пропадут — настройте S3 (Timeweb App Platform не монтирует /data).`
         );
       } else {
         console.log(`[storage] Постоянное хранилище: ${dir}`);
