@@ -55,6 +55,39 @@ function exportPostgresJson(targetDir) {
   return { kind: 'postgres_json', summary };
 }
 
+async function exportPostgresJsonAsync(targetDir) {
+  const exportDir = path.join(targetDir, 'json');
+  fs.mkdirSync(exportDir, { recursive: true });
+  const summary = {};
+  const pool = db.pool;
+  if (!pool) {
+    return exportPostgresJson(targetDir);
+  }
+
+  for (const table of EXPORT_TABLES) {
+    try {
+      const result = await pool.query(`SELECT * FROM ${table}`);
+      fs.writeFileSync(
+        path.join(exportDir, `${table}.json`),
+        JSON.stringify(result.rows, null, 2),
+        'utf8'
+      );
+      summary[table] = result.rows.length;
+    } catch (error) {
+      summary[table] = { error: error.message };
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  fs.writeFileSync(
+    path.join(exportDir, '_summary.json'),
+    JSON.stringify({ exported_at: new Date().toISOString(), tables: summary }, null, 2),
+    'utf8'
+  );
+
+  return { kind: 'postgres_json', summary };
+}
+
 function dumpPostgresSql(targetFile) {
   const connectionString = buildConnectionString();
   if (!connectionString) {
@@ -100,4 +133,21 @@ function exportDatabase(targetDir) {
   return backupSqlite(sqliteFile);
 }
 
-module.exports = { exportDatabase, EXPORT_TABLES };
+async function exportDatabaseAsync(targetDir) {
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  if (isPostgresEnabled() && db.kind === 'postgres') {
+    const sqlFile = path.join(targetDir, 'database.sql');
+    try {
+      return dumpPostgresSql(sqlFile);
+    } catch (error) {
+      console.warn('[backup] pg_dump unavailable, falling back to async JSON export:', error.message);
+      return exportPostgresJsonAsync(targetDir);
+    }
+  }
+
+  const sqliteFile = path.join(targetDir, 'database.sqlite');
+  return backupSqlite(sqliteFile);
+}
+
+module.exports = { exportDatabase, exportDatabaseAsync, EXPORT_TABLES };

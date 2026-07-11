@@ -4,7 +4,7 @@ const os = require('os');
 const db = require('../../database');
 const { logActivity } = require('../../utils/activity');
 const { getBackupConfig } = require('./backupConfig');
-const { exportDatabase } = require('./backupDatabase');
+const { exportDatabaseAsync } = require('./backupDatabase');
 const { createBackupZip, prepareStagingDirectory } = require('./backupArchiver');
 const { uploadBackupRemote } = require('./backupRemote');
 
@@ -101,7 +101,7 @@ async function runFullBackup({ trigger = 'manual', userId = null, uploadRemote =
     fs.mkdirSync(config.backupDir, { recursive: true });
 
     const { dbDir, uploadsFileCount, uploadsSizeBytes } = prepareStagingDirectory(stagingDir);
-    const dbExport = exportDatabase(dbDir);
+    const dbExport = await exportDatabaseAsync(dbDir);
 
     const manifest = {
       version: 1,

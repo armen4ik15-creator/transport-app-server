@@ -160,7 +160,6 @@ async function queryWithTimeout(pool, sql, timeoutMs = 12000) {
   const queryPromise = pool.query(sql);
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => {
-      pool.end().catch(() => {});
       reject(Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' }));
     }, timeoutMs);
   });

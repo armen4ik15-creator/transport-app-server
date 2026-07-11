@@ -44,6 +44,19 @@ app.use(
   })
 );
 app.use(responseNoiseMiddleware);
+
+const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 500);
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= SLOW_REQUEST_MS) {
+      console.warn(`[slow] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    }
+  });
+  next();
+});
+
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 if (!fs.existsSync(APP_DOWNLOADS_DIR)) {
@@ -158,7 +171,8 @@ function mountRoutes() {
   }
 
   app.use((err, _req, res, _next) => {
-    console.error('[error]', err);
+    if (res.headersSent) return;
+    console.error('[error]', err?.stack || err);
     res
       .status(err.status || 500)
       .json({ error: err.message || 'Внутренняя ошибка сервера' });

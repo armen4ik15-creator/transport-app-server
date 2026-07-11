@@ -42,6 +42,14 @@ router.get('/', (_req, res) => {
   if (db.kind === 'postgres') {
     payload.db_connected = true;
     payload.database_url_set = Boolean(buildConnectionString());
+    const pingStartedAt = Date.now();
+    try {
+      db.prepare('SELECT 1').get();
+      payload.db_ping_ms = Date.now() - pingStartedAt;
+    } catch (pingError) {
+      payload.db_ping_ms = Date.now() - pingStartedAt;
+      payload.db_ping_error = pingError.message;
+    }
     return res.json(payload);
   }
 

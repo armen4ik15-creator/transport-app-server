@@ -4,9 +4,16 @@ const db = require('../../database');
 
 let intervalTimer = null;
 let cronTask = null;
+let startupDelayTimer = null;
+
+const BACKUP_STARTUP_DELAY_MS = Number(process.env.BACKUP_STARTUP_DELAY_MS || 10 * 60 * 1000);
 
 async function tick(trigger = 'scheduled') {
   if (isBackupRunning()) return;
+  if (db.kind === 'postgres_error') {
+    console.log(`[backup] ${trigger} skipped (database unavailable)`);
+    return;
+  }
   try {
     await runFullBackup({ trigger, userId: null, uploadRemote: true });
     console.log(`[backup] ${trigger} backup completed`);
@@ -63,11 +70,20 @@ function startBackupScheduler() {
   scheduleInterval();
   scheduleCron();
   console.log(`[backup] interval scheduler started (every ${config.intervalHours}h)`);
+  if (startupDelayTimer) clearTimeout(startupDelayTimer);
+  console.log(`[backup] first scheduled backup delayed by ${Math.round(BACKUP_STARTUP_DELAY_MS / 60000)} min`);
+  startupDelayTimer = setTimeout(() => {
+    void tick('startup-delayed');
+  }, BACKUP_STARTUP_DELAY_MS);
 }
 
 function restartBackupScheduler() {
   scheduleInterval();
   scheduleCron();
+  if (startupDelayTimer) clearTimeout(startupDelayTimer);
+  startupDelayTimer = setTimeout(() => {
+    void tick('startup-delayed');
+  }, BACKUP_STARTUP_DELAY_MS);
 }
 
 module.exports = { startBackupScheduler, restartBackupScheduler, runBackupNow: tick };
