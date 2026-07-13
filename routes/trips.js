@@ -7,6 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { deleteStoredUpload } = require('../utils/uploadsStorage');
 const { persistUploadMirror } = require('../utils/uploadPersistence');
+const { queueTripPhotoArchive } = require('../services/yandexArchive/yandexArchiveService');
 
 const router = express.Router();
 
@@ -313,6 +314,8 @@ async function persistTripPhoto(req, res, id, buffer, mimeType) {
     updatedTrip = { id, photo_path: filePath };
   }
 
+  queueTripPhotoArchive(id, { buffer, contentType: mimeType });
+
   return res.json({ ...updatedTrip, photo_available: true });
 }
 
@@ -504,6 +507,10 @@ router.post('/', (req, res, next) => {
           buffer,
           mimeType: req.file?.mimetype || 'image/jpeg',
         });
+        queueTripPhotoArchive(trip.id, {
+          buffer,
+          contentType: req.file?.mimetype || 'image/jpeg',
+        });
       } catch (error) {
         db.prepare('UPDATE trips SET photo_path = NULL WHERE id = ?').run(trip.id);
         unlinkStoredUpload(filePath);
@@ -566,6 +573,10 @@ router.post('/', (req, res, next) => {
       await persistUploadMirror(filePath, {
         buffer,
         mimeType: req.file?.mimetype || 'image/jpeg',
+      });
+      queueTripPhotoArchive(activeTrip.id, {
+        buffer,
+        contentType: req.file?.mimetype || 'image/jpeg',
       });
     } catch (error) {
       db.prepare('UPDATE trips SET photo_path = ? WHERE id = ?').run(activeTrip.photo_path, activeTrip.id);

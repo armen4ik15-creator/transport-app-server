@@ -58,17 +58,21 @@ async function ensureFolder(token, folderPath) {
   return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
 
-async function uploadFileToYandexDisk({
+async function uploadBufferToYandexDisk({
   token,
-  localFilePath,
+  buffer,
   remoteFolder = '/ReestrPro/backups',
   filename,
+  contentType = 'application/octet-stream',
 }) {
   if (!token) {
     return { uploaded: false, reason: 'yandex_token_not_configured' };
   }
-  if (!fs.existsSync(localFilePath)) {
-    throw new Error('Local backup file not found for Yandex upload');
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new Error('Empty buffer for Yandex upload');
+  }
+  if (!filename) {
+    throw new Error('Filename required for Yandex upload');
   }
 
   const folder = await ensureFolder(token, remoteFolder);
@@ -84,14 +88,13 @@ async function uploadFileToYandexDisk({
     throw new Error('Yandex Disk did not return upload href');
   }
 
-  const fileBuffer = fs.readFileSync(localFilePath);
   const putResponse = await fetch(uploadInfo.href, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/zip',
-      'Content-Length': String(fileBuffer.length),
+      'Content-Type': contentType,
+      'Content-Length': String(buffer.length),
     },
-    body: fileBuffer,
+    body: buffer,
   });
 
   if (!putResponse.ok && putResponse.status !== 201 && putResponse.status !== 202) {
@@ -102,11 +105,37 @@ async function uploadFileToYandexDisk({
   return {
     uploaded: true,
     path: remotePath,
-    sizeBytes: fileBuffer.length,
+    sizeBytes: buffer.length,
   };
+}
+
+async function uploadFileToYandexDisk({
+  token,
+  localFilePath,
+  remoteFolder = '/ReestrPro/backups',
+  filename,
+  contentType = 'application/zip',
+}) {
+  if (!token) {
+    return { uploaded: false, reason: 'yandex_token_not_configured' };
+  }
+  if (!fs.existsSync(localFilePath)) {
+    throw new Error('Local backup file not found for Yandex upload');
+  }
+
+  const fileBuffer = fs.readFileSync(localFilePath);
+  return uploadBufferToYandexDisk({
+    token,
+    buffer: fileBuffer,
+    remoteFolder,
+    filename,
+    contentType,
+  });
 }
 
 module.exports = {
   uploadFileToYandexDisk,
+  uploadBufferToYandexDisk,
   ensureFolder,
+  yandexRequest,
 };

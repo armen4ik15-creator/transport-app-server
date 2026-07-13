@@ -11,6 +11,10 @@ const {
   resolveBackupFile,
   isBackupRunning,
 } = require('../services/backup/backupService');
+const {
+  getYandexArchiveConfig,
+  runYandexArchiveSync,
+} = require('../services/yandexArchive/yandexArchiveService');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -116,6 +120,32 @@ router.get('/download/:filename', requireAdmin, (req, res) => {
     return undefined;
   } catch (error) {
     return res.status(404).json({ error: error.message || 'Backup not found' });
+  }
+});
+
+router.post('/yandex-archive/sync', requireAdmin, async (req, res) => {
+  const config = getYandexArchiveConfig();
+  if (!config.enabled) {
+    return res.status(503).json({
+      error: 'Яндекс.Диск не настроен (нет YANDEX_DISK_TOKEN)',
+    });
+  }
+
+  try {
+    const result = await runYandexArchiveSync({
+      photos: req.body?.photos !== false,
+      reports: req.body?.reports !== false,
+      photoLimit: Number(req.body?.photoLimit) || 500,
+    });
+    return res.json({
+      ok: true,
+      message: 'Синхронизация архива на Яндекс.Диск завершена',
+      ...result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || 'Yandex archive sync failed',
+    });
   }
 });
 

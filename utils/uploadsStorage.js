@@ -134,6 +134,43 @@ async function isUploadAvailable(webPath) {
   return false;
 }
 
+async function readUploadBuffer(webPath) {
+  const normalized = normalizeUploadWebPath(webPath);
+  if (!normalized) return null;
+
+  const absolute = resolveUploadAbsolutePath(normalized);
+  if (absolute) {
+    return fs.readFileSync(absolute);
+  }
+
+  const config = readS3Env();
+  if (!config.enabled) return null;
+
+  const client = createS3Client(config);
+  const key = getUploadsObjectKey(normalized);
+  if (!client || !key) return null;
+
+  try {
+    const response = await sendS3Command(
+      client,
+      new GetObjectCommand({ Bucket: config.bucket, Key: key })
+    );
+    if (!response.Body) return null;
+
+    const body = response.Body;
+    if (Buffer.isBuffer(body)) return body;
+
+    const chunks = [];
+    for await (const chunk of body) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    console.warn('[uploads] S3 read buffer failed:', error.message);
+    return null;
+  }
+}
+
 async function streamUploadToResponse(webPath, res) {
   const config = readS3Env();
   if (!config.enabled) return false;
@@ -221,6 +258,7 @@ module.exports = {
   uploadBufferToS3,
   uploadLocalFileToS3,
   deleteFromS3,
+  readUploadBuffer,
   streamUploadToResponse,
   isUploadAvailable,
   deleteStoredUpload,

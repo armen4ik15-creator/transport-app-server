@@ -215,6 +215,9 @@ function mountRoutes() {
   const { startBackupScheduler } = require('./services/backup/backupScheduler');
   startBackupScheduler();
 
+  const { startYandexArchiveScheduler } = require('./services/yandexArchive/scheduler');
+  startYandexArchiveScheduler();
+
   if (process.env.HMAC_DEBUG === '1') {
     setTimeout(() => dumpDeviceSecretsForDebug(dbModule), 8000);
   }
