@@ -195,6 +195,7 @@ function getBackupStatus() {
     keepLocalCount: config.keepLocalCount,
     remote: {
       s3: config.s3.enabled,
+      yandex: config.yandexDisk.enabled,
       webhook: Boolean(config.webhookUrl),
       telegram: Boolean(config.telegram.botToken && config.telegram.chatId),
     },

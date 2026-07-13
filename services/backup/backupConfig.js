@@ -12,6 +12,8 @@ function getBackupConfig() {
   const backupDir = path.join(DATA_DIR, 'backups');
   const s3 = readS3Env();
   const cronSchedule = process.env.BACKUP_CRON_SCHEDULE || '0 3 * * *';
+  const yandexToken =
+    process.env.YANDEX_DISK_TOKEN || process.env.BACKUP_YANDEX_DISK_TOKEN || '';
 
   return {
     enabled: process.env.BACKUP_ENABLED !== 'false',
@@ -28,6 +30,14 @@ function getBackupConfig() {
       accessKey: s3.accessKey,
       secretKey: s3.secretKey,
       prefix: s3.prefix,
+    },
+    yandexDisk: {
+      enabled: Boolean(yandexToken),
+      token: yandexToken,
+      folder:
+        process.env.YANDEX_DISK_FOLDER ||
+        process.env.BACKUP_YANDEX_DISK_FOLDER ||
+        '/ReestrPro/backups',
     },
     restoreCode: process.env.BACKUP_RESTORE_CODE || process.env.PASSWORD_RESET_CODE || '',
     webhookUrl: process.env.BACKUP_WEBHOOK_URL || '',
