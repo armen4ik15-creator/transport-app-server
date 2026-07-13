@@ -18,7 +18,6 @@ const {
 } = require('../../utils/transportExports');
 const {
   uploadBufferToYandexDisk,
-  ensureFolder,
 } = require('../backup/yandexDisk');
 
 function getYandexArchiveConfig() {
@@ -150,28 +149,30 @@ async function uploadTripPhotoToYandex(tripId, options = {}) {
     return { uploaded: false, reason: 'yandex_archive_disabled' };
   }
 
+  // Sync DB до любых await.
   const trip = options.trip || fetchTripForArchive(tripId);
   if (!trip?.photo_path) {
     return { uploaded: false, reason: 'no_photo' };
-  }
-
-  const buffer =
-    options.buffer || (await readUploadBuffer(String(trip.photo_path).trim()));
-  if (!buffer?.length) {
-    return { uploaded: false, reason: 'photo_bytes_unavailable' };
   }
 
   const driverFolder = `Водитель - ${sanitizePathSegment(trip.driver_name, 'Без имени')}`;
   const dateFolder = formatDateFolder(trip.trip_date);
   const remoteFolder = `${config.root}/${config.driversFolder}/${driverFolder}/${dateFolder}`;
   const filename = buildPhotoFilename(trip);
+  const contentType = options.contentType || guessImageContentType(trip.photo_path);
+  const photoPath = String(trip.photo_path).trim();
+
+  const buffer = options.buffer || (await readUploadBuffer(photoPath));
+  if (!buffer?.length) {
+    return { uploaded: false, reason: 'photo_bytes_unavailable' };
+  }
 
   const result = await uploadBufferToYandexDisk({
     token: config.token,
     buffer,
     remoteFolder,
     filename,
-    contentType: options.contentType || guessImageContentType(trip.photo_path),
+    contentType,
   });
 
   return {
@@ -202,6 +203,7 @@ async function syncAllTripPhotosToYandex({ limit = 500 } = {}) {
     return { uploaded: 0, failed: 0, skipped: true, reason: 'disabled' };
   }
 
+  // Весь список из БД — до await.
   const trips = fetchTripsWithPhotos().slice(0, Math.max(1, limit));
   let uploaded = 0;
   let failed = 0;
@@ -231,12 +233,8 @@ async function syncMonthlyReportsToYandex({ months = 2 } = {}) {
     return { uploaded: [], skipped: true, reason: 'disabled' };
   }
 
-  await ensureFolder(config.token, `${config.root}/${config.registryFolder}`);
-  await ensureFolder(config.token, `${config.root}/${config.financeFolder}`);
-
-  const uploaded = [];
-
-  for (const month of listRecentMonths(months)) {
+  // Важно: сначала все sync-запросы к БД, затем await (deasync + await = hang/timeout).
+  const monthPayloads = listRecentMonths(months).map((month) => {
     const tripRows = fetchCompletedTrips({
       dateFrom: month.dateFrom,
       dateTo: month.dateTo,
@@ -248,7 +246,13 @@ async function syncMonthlyReportsToYandex({ months = 2 } = {}) {
       dateTo: month.dateTo,
       driverId: null,
     });
+    return { month, tripRows, expenseRows };
+  });
 
+  const uploaded = [];
+
+  for (const payload of monthPayloads) {
+    const { month, tripRows, expenseRows } = payload;
     const registryWorkbook = buildRegistryWorkbook(tripRows);
     const financeWorkbook = buildFinancialWorkbook(tripRows, expenseRows);
 
@@ -291,13 +295,87 @@ async function runYandexArchiveSync({ photos = true, reports = true, photoLimit 
     return { ok: false, reason: 'yandex_archive_disabled' };
   }
 
+  // Сначала весь sync-read из БД, потом любые await (иначе deasync timeout).
+  const preparedPhotos = photos
+    ? fetchTripsWithPhotos().slice(0, Math.max(1, photoLimit))
+    : [];
+  const preparedReports = reports
+    ? listRecentMonths(2).map((month) => ({
+        month,
+        tripRows: fetchCompletedTrips({
+          dateFrom: month.dateFrom,
+          dateTo: month.dateTo,
+          driverId: null,
+          vehiclePlate: null,
+        }),
+        expenseRows: fetchExpenses({
+          dateFrom: month.dateFrom,
+          dateTo: month.dateTo,
+          driverId: null,
+        }),
+      }))
+    : [];
+
   const result = { ok: true, photos: null, reports: null };
 
   if (photos) {
-    result.photos = await syncAllTripPhotosToYandex({ limit: photoLimit });
+    let uploaded = 0;
+    let failed = 0;
+    const errors = [];
+    for (const trip of preparedPhotos) {
+      try {
+        const item = await uploadTripPhotoToYandex(trip.id, { trip });
+        if (item.uploaded) uploaded += 1;
+        else failed += 1;
+      } catch (error) {
+        failed += 1;
+        errors.push({ tripId: trip.id, error: error.message });
+      }
+    }
+    result.photos = {
+      uploaded,
+      failed,
+      total: preparedPhotos.length,
+      errors: errors.slice(0, 20),
+    };
   }
+
   if (reports) {
-    result.reports = await syncMonthlyReportsToYandex({ months: 2 });
+    const uploaded = [];
+    for (const payload of preparedReports) {
+      const { month, tripRows, expenseRows } = payload;
+      const registryBuffer = await workbookToBuffer(buildRegistryWorkbook(tripRows));
+      const financeBuffer = await workbookToBuffer(
+        buildFinancialWorkbook(tripRows, expenseRows)
+      );
+
+      const registryResult = await uploadBufferToYandexDisk({
+        token: config.token,
+        buffer: registryBuffer,
+        remoteFolder: `${config.root}/${config.registryFolder}`,
+        filename: `${month.label}_реестр_перевозок.xlsx`,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      const financeResult = await uploadBufferToYandexDisk({
+        token: config.token,
+        buffer: financeBuffer,
+        remoteFolder: `${config.root}/${config.financeFolder}`,
+        filename: `${month.label}_финансовый_отчёт.xlsx`,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      uploaded.push({
+        month: month.label,
+        registry: registryResult.path,
+        finance: financeResult.path,
+        trips: tripRows.length,
+        expenses: expenseRows.length,
+      });
+    }
+    result.reports = { uploaded };
   }
 
   return result;
