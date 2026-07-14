@@ -64,6 +64,7 @@ async function uploadBufferToYandexDisk({
   remoteFolder = '/ReestrPro/backups',
   filename,
   contentType = 'application/octet-stream',
+  overwrite = true,
 }) {
   if (!token) {
     return { uploaded: false, reason: 'yandex_token_not_configured' };
@@ -81,7 +82,7 @@ async function uploadBufferToYandexDisk({
   const uploadInfo = await yandexRequest(
     token,
     'GET',
-    `/resources/upload?path=${encodeURIComponent(remotePath)}&overwrite=true`
+    `/resources/upload?path=${encodeURIComponent(remotePath)}&overwrite=${overwrite ? 'true' : 'false'}`
   );
 
   if (!uploadInfo?.href) {

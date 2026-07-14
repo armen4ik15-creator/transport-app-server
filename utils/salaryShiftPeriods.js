@@ -97,10 +97,20 @@ function listSalaryShiftsForArchiveSync(refDate = new Date()) {
   );
 }
 
-function shiftArchiveFilename(shift) {
+function shiftFolderName(shift) {
   const from = formatRuShortDate(shift.dateFrom);
   const to = formatRuShortDate(shift.dateTo);
-  return `вахта ${from}-${to}.xlsx`;
+  return `вахта ${from}-${to}`;
+}
+
+/** Имя файла-снимка на дату выгрузки (15.07.26.xlsx) — каждая выдача = отдельный файл в истории. */
+function earningsSnapshotFilename(exportDateIso) {
+  return `${formatRuShortDate(exportDateIso)}.xlsx`;
+}
+
+/** @deprecated используйте shiftFolderName + earningsSnapshotFilename */
+function shiftArchiveFilename(shift) {
+  return `${shiftFolderName(shift)}.xlsx`;
 }
 
 function formatRuShortDate(isoDate) {
@@ -114,6 +124,8 @@ module.exports = {
   shiftPeriodBounds,
   shiftsDueOnCalendarDay,
   listSalaryShiftsForArchiveSync,
+  shiftFolderName,
+  earningsSnapshotFilename,
   shiftArchiveFilename,
   formatRuShortDate,
 };

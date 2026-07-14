@@ -5,7 +5,7 @@
  *   /ReestrPro/Водители/Водитель - {Name}/{dd.mm.yy}/ТТН_*.jpg
  *   /ReestrPro/Реестры/{YYYY-MM}_реестр_перевозок.xlsx
  *   /ReestrPro/Финансы/{YYYY-MM}_финансовый_отчёт.xlsx
- *   /ReestrPro/Заработок/Водитель - {Name}/вахта dd.mm.yy-dd.mm.yy.xlsx
+ *   /ReestrPro/Заработок/Водитель - {Name}/вахта dd.mm.yy-dd.mm.yy/{dd.mm.yy}.xlsx
  */
 const path = require('path');
 const db = require('../../database');
@@ -25,7 +25,8 @@ const {
 const {
   shiftsDueOnCalendarDay,
   listSalaryShiftsForArchiveSync,
-  shiftArchiveFilename,
+  shiftFolderName,
+  earningsSnapshotFilename,
 } = require('../../utils/salaryShiftPeriods');
 const {
   uploadBufferToYandexDisk,
@@ -304,10 +305,24 @@ async function syncMonthlyReportsToYandex({ months = 2 } = {}) {
   return { uploaded };
 }
 
-function prepareDriverEarningsPayloads(shifts, drivers) {
+function resolveEarningsExportDate(shift, options = {}) {
+  if (options.exportDateIso) {
+    return String(options.exportDateIso).slice(0, 10);
+  }
+  if (options.useShiftEndDate) {
+    return shift.dateTo;
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
+function prepareDriverEarningsPayloads(shifts, drivers, options = {}) {
   const payloads = [];
 
   for (const shift of shifts) {
+    const exportDateIso = resolveEarningsExportDate(shift, options);
+    const shiftFolder = shiftFolderName(shift);
+    const snapshotFilename = earningsSnapshotFilename(exportDateIso);
+
     for (const driver of drivers) {
       const report = buildDriverEarningsReport(
         db,
@@ -326,7 +341,9 @@ function prepareDriverEarningsPayloads(shifts, drivers) {
       payloads.push({
         shift,
         driver,
-        filename: shiftArchiveFilename(shift),
+        shiftFolder,
+        filename: snapshotFilename,
+        exportDateIso,
         workbook: buildDriverEarningsWorkbook(report),
         report,
       });
@@ -338,33 +355,57 @@ function prepareDriverEarningsPayloads(shifts, drivers) {
 
 async function uploadDriverEarningsPayloads(config, preparedItems) {
   const uploaded = [];
+  const skipped = [];
+
   for (const item of preparedItems) {
     const driverFolder = `Водитель - ${sanitizePathSegment(item.driver.driver_name, 'Без имени')}`;
-    const remoteFolder = `${config.root}/${config.earningsFolder}/${driverFolder}`;
-    const buffer = await workbookToBuffer(item.workbook);
-    const result = await uploadBufferToYandexDisk({
-      token: config.token,
-      buffer,
-      remoteFolder,
-      filename: item.filename,
-      contentType:
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    uploaded.push({
-      driver: item.driver.driver_name,
-      shift: item.shift.shift,
-      period: `${item.shift.dateFrom} — ${item.shift.dateTo}`,
-      filename: item.filename,
-      path: result.path,
-      total_earnings: item.report.summary.total_earnings,
-      debt: item.report.summary.debt,
-      sizeBytes: result.sizeBytes,
-    });
+    const remoteFolder = `${config.root}/${config.earningsFolder}/${driverFolder}/${item.shiftFolder}`;
+
+    try {
+      const buffer = await workbookToBuffer(item.workbook);
+      const result = await uploadBufferToYandexDisk({
+        token: config.token,
+        buffer,
+        remoteFolder,
+        filename: item.filename,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        overwrite: false,
+      });
+      uploaded.push({
+        driver: item.driver.driver_name,
+        shift: item.shift.shift,
+        period: `${item.shift.dateFrom} — ${item.shift.dateTo}`,
+        shift_folder: item.shiftFolder,
+        snapshot: item.filename,
+        export_date: item.exportDateIso,
+        path: result.path,
+        total_earnings: item.report.summary.total_earnings,
+        debt: item.report.summary.debt,
+        sizeBytes: result.sizeBytes,
+      });
+    } catch (error) {
+      if (error.status === 409) {
+        skipped.push({
+          driver: item.driver.driver_name,
+          snapshot: item.filename,
+          shift_folder: item.shiftFolder,
+          reason: 'already_in_archive',
+        });
+        continue;
+      }
+      throw error;
+    }
   }
-  return { uploaded };
+
+  return { uploaded, skipped };
 }
 
-async function syncDriverEarningsToYandex({ shifts = null, fullRecent = false } = {}) {
+async function syncDriverEarningsToYandex({
+  shifts = null,
+  fullRecent = false,
+  useShiftEndDate = false,
+} = {}) {
   const config = getYandexArchiveConfig();
   if (!config.enabled) {
     return { uploaded: [], skipped: true, reason: 'disabled' };
@@ -379,7 +420,9 @@ async function syncDriverEarningsToYandex({ shifts = null, fullRecent = false } 
   }
 
   const drivers = fetchAllDrivers(db);
-  const prepared = prepareDriverEarningsPayloads(shiftList, drivers);
+  const prepared = prepareDriverEarningsPayloads(shiftList, drivers, {
+    useShiftEndDate: fullRecent || useShiftEndDate,
+  });
   return uploadDriverEarningsPayloads(config, prepared);
 }
 
@@ -419,7 +462,8 @@ async function runYandexArchiveSync({
     earnings && earningsFullRecent
       ? prepareDriverEarningsPayloads(
           listSalaryShiftsForArchiveSync(),
-          fetchAllDrivers(db)
+          fetchAllDrivers(db),
+          { useShiftEndDate: true }
         )
       : [];
 
