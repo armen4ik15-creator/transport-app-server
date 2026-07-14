@@ -135,6 +135,8 @@ router.post('/yandex-archive/sync', requireAdmin, async (req, res) => {
     const result = await runYandexArchiveSync({
       photos: req.body?.photos !== false,
       reports: req.body?.reports !== false,
+      salary: req.body?.salary !== false,
+      salaryFullRecent: req.body?.salaryFullRecent !== false,
       photoLimit: Number(req.body?.photoLimit) || 500,
     });
     return res.json({

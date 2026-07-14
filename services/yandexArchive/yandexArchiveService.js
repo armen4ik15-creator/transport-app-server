@@ -5,6 +5,7 @@
  *   /ReestrPro/Водители/Водитель - {Name}/{dd.mm.yy}/ТТН_*.jpg
  *   /ReestrPro/Реестры/{YYYY-MM}_реестр_перевозок.xlsx
  *   /ReestrPro/Финансы/{YYYY-MM}_финансовый_отчёт.xlsx
+ *   /ReestrPro/Зарплата/{YYYY-MM}_вахта1|2_зарплатный_табель.xlsx
  */
 const path = require('path');
 const db = require('../../database');
@@ -16,6 +17,11 @@ const {
   buildFinancialWorkbook,
   workbookToBuffer,
 } = require('../../utils/transportExports');
+const { buildSalaryTimesheetWorkbook } = require('../../utils/salaryExport');
+const {
+  shiftsDueOnCalendarDay,
+  listSalaryShiftsForArchiveSync,
+} = require('../../utils/salaryShiftPeriods');
 const {
   uploadBufferToYandexDisk,
 } = require('../backup/yandexDisk');
@@ -36,6 +42,7 @@ function getYandexArchiveConfig() {
     driversFolder: process.env.YANDEX_ARCHIVE_DRIVERS || 'Водители',
     registryFolder: process.env.YANDEX_ARCHIVE_REGISTRY || 'Реестры',
     financeFolder: process.env.YANDEX_ARCHIVE_FINANCE || 'Финансы',
+    salaryFolder: process.env.YANDEX_ARCHIVE_SALARY || 'Зарплата',
   };
 }
 
@@ -289,7 +296,67 @@ async function syncMonthlyReportsToYandex({ months = 2 } = {}) {
   return { uploaded };
 }
 
-async function runYandexArchiveSync({ photos = true, reports = true, photoLimit = 500 } = {}) {
+function prepareSalaryShiftWorkbooks(shifts) {
+  return shifts.map((shift) => ({
+    shift,
+    workbook: buildSalaryTimesheetWorkbook(db, {
+      dateFrom: shift.dateFrom,
+      dateTo: shift.dateTo,
+      driverId: null,
+    }),
+  }));
+}
+
+async function uploadSalaryShiftWorkbooks(config, preparedSalary) {
+  const uploaded = [];
+  for (const item of preparedSalary) {
+    const buffer = await workbookToBuffer(item.workbook);
+    const result = await uploadBufferToYandexDisk({
+      token: config.token,
+      buffer,
+      remoteFolder: `${config.root}/${config.salaryFolder}`,
+      filename: item.shift.filename,
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    uploaded.push({
+      shift: item.shift.shift,
+      period: `${item.shift.dateFrom} — ${item.shift.dateTo}`,
+      title: item.shift.title,
+      path: result.path,
+      sizeBytes: result.sizeBytes,
+    });
+  }
+  return { uploaded };
+}
+
+async function syncSalaryShiftsToYandex({ shifts = null, fullRecent = false } = {}) {
+  const config = getYandexArchiveConfig();
+  if (!config.enabled) {
+    return { uploaded: [], skipped: true, reason: 'disabled' };
+  }
+
+  const shiftList =
+    shifts ??
+    (fullRecent
+      ? listSalaryShiftsForArchiveSync()
+      : shiftsDueOnCalendarDay());
+
+  if (!shiftList.length) {
+    return { uploaded: [], skipped: true, reason: 'no_shifts_due' };
+  }
+
+  const preparedSalary = prepareSalaryShiftWorkbooks(shiftList);
+  return uploadSalaryShiftWorkbooks(config, preparedSalary);
+}
+
+async function runYandexArchiveSync({
+  photos = true,
+  reports = true,
+  salary = false,
+  salaryFullRecent = true,
+  photoLimit = 500,
+} = {}) {
   const config = getYandexArchiveConfig();
   if (!config.enabled) {
     return { ok: false, reason: 'yandex_archive_disabled' };
@@ -315,8 +382,12 @@ async function runYandexArchiveSync({ photos = true, reports = true, photoLimit 
         }),
       }))
     : [];
+  const preparedSalary =
+    salary && salaryFullRecent
+      ? prepareSalaryShiftWorkbooks(listSalaryShiftsForArchiveSync())
+      : [];
 
-  const result = { ok: true, photos: null, reports: null };
+  const result = { ok: true, photos: null, reports: null, salary: null };
 
   if (photos) {
     let uploaded = 0;
@@ -378,6 +449,10 @@ async function runYandexArchiveSync({ photos = true, reports = true, photoLimit 
     result.reports = { uploaded };
   }
 
+  if (salary && preparedSalary.length) {
+    result.salary = await uploadSalaryShiftWorkbooks(config, preparedSalary);
+  }
+
   return result;
 }
 
@@ -387,6 +462,7 @@ module.exports = {
   queueTripPhotoArchive,
   syncAllTripPhotosToYandex,
   syncMonthlyReportsToYandex,
+  syncSalaryShiftsToYandex,
   runYandexArchiveSync,
   formatDateFolder,
   sanitizePathSegment,
