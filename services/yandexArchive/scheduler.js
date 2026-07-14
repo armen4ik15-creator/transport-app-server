@@ -2,7 +2,7 @@ const {
   getYandexArchiveConfig,
   syncMonthlyReportsToYandex,
   syncAllTripPhotosToYandex,
-  syncSalaryShiftsToYandex,
+  syncDriverEarningsToYandex,
 } = require('./yandexArchiveService');
 const { shiftsDueOnCalendarDay } = require('../../utils/salaryShiftPeriods');
 
@@ -10,24 +10,24 @@ const STARTUP_DELAY_MS = Number(process.env.YANDEX_ARCHIVE_STARTUP_DELAY_MS || 1
 const REPORTS_INTERVAL_MS = Number(
   process.env.YANDEX_ARCHIVE_REPORTS_INTERVAL_MS || 24 * 60 * 60 * 1000
 );
-const SALARY_CRON = process.env.YANDEX_ARCHIVE_SALARY_CRON || '0 3 * * *';
+const EARNINGS_CRON = process.env.YANDEX_ARCHIVE_EARNINGS_CRON || '0 3 * * *';
 
 let started = false;
 let running = false;
-let salaryCronTask = null;
+let earningsCronTask = null;
 
-async function syncDueSalaryShifts(trigger = 'scheduled') {
+async function syncDueDriverEarnings(trigger = 'scheduled') {
   const due = shiftsDueOnCalendarDay();
   if (!due.length) return null;
 
   console.log(
-    `[yandex-archive] ${trigger}: salary shifts due (${due.map((s) => s.title).join(', ')})`
+    `[yandex-archive] ${trigger}: driver earnings due (${due.map((s) => s.title).join(', ')})`
   );
-  const salary = await syncSalaryShiftsToYandex({ shifts: due });
+  const earnings = await syncDriverEarningsToYandex({ shifts: due });
   console.log(
-    `[yandex-archive] ${trigger}: salary uploaded=${salary.uploaded?.length || 0}`
+    `[yandex-archive] ${trigger}: earnings uploaded=${earnings.uploaded?.length || 0}`
   );
-  return salary;
+  return earnings;
 }
 
 async function tick(trigger = 'scheduled') {
@@ -42,8 +42,8 @@ async function tick(trigger = 'scheduled') {
       `[yandex-archive] ${trigger}: reports done (${reports.uploaded?.length || 0} months)`
     );
 
-    if (trigger === 'startup' || trigger === 'salary-cron') {
-      await syncDueSalaryShifts(trigger);
+    if (trigger === 'startup' || trigger === 'earnings-cron') {
+      await syncDueDriverEarnings(trigger);
     }
 
     if (trigger === 'startup' || process.env.YANDEX_ARCHIVE_SYNC_PHOTOS_ON_SCHEDULE === '1') {
@@ -60,23 +60,23 @@ async function tick(trigger = 'scheduled') {
   }
 }
 
-function startSalaryShiftCron() {
+function startDriverEarningsCron() {
   try {
     const cron = require('node-cron');
-    if (!cron.validate(SALARY_CRON)) {
-      console.warn(`[yandex-archive] invalid salary cron: ${SALARY_CRON}`);
+    if (!cron.validate(EARNINGS_CRON)) {
+      console.warn(`[yandex-archive] invalid earnings cron: ${EARNINGS_CRON}`);
       return;
     }
-    salaryCronTask = cron.schedule(SALARY_CRON, () => {
+    earningsCronTask = cron.schedule(EARNINGS_CRON, () => {
       const due = shiftsDueOnCalendarDay();
       if (!due.length) return;
-      void tick('salary-cron');
+      void tick('earnings-cron');
     });
     console.log(
-      `[yandex-archive] salary shift cron started (${SALARY_CRON}, days 15 & 30/last)`
+      `[yandex-archive] driver earnings cron started (${EARNINGS_CRON}, days 15 & 30/last)`
     );
   } catch (error) {
-    console.warn('[yandex-archive] salary cron unavailable:', error.message);
+    console.warn('[yandex-archive] earnings cron unavailable:', error.message);
   }
 }
 
@@ -101,11 +101,11 @@ function startYandexArchiveScheduler() {
     void tick('interval');
   }, REPORTS_INTERVAL_MS);
 
-  startSalaryShiftCron();
+  startDriverEarningsCron();
 }
 
 module.exports = {
   startYandexArchiveScheduler,
   runYandexArchiveNow: tick,
-  syncDueSalaryShifts,
+  syncDueDriverEarnings,
 };

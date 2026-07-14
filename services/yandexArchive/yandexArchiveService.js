@@ -5,7 +5,7 @@
  *   /ReestrPro/Водители/Водитель - {Name}/{dd.mm.yy}/ТТН_*.jpg
  *   /ReestrPro/Реестры/{YYYY-MM}_реестр_перевозок.xlsx
  *   /ReestrPro/Финансы/{YYYY-MM}_финансовый_отчёт.xlsx
- *   /ReestrPro/Зарплата/{YYYY-MM}_вахта1|2_зарплатный_табель.xlsx
+ *   /ReestrPro/Заработок/Водитель - {Name}/вахта dd.mm.yy-dd.mm.yy.xlsx
  */
 const path = require('path');
 const db = require('../../database');
@@ -17,10 +17,15 @@ const {
   buildFinancialWorkbook,
   workbookToBuffer,
 } = require('../../utils/transportExports');
-const { buildSalaryTimesheetWorkbook } = require('../../utils/salaryExport');
+const {
+  fetchAllDrivers,
+  buildDriverEarningsReport,
+  buildDriverEarningsWorkbook,
+} = require('../../utils/driverEarningsExport');
 const {
   shiftsDueOnCalendarDay,
   listSalaryShiftsForArchiveSync,
+  shiftArchiveFilename,
 } = require('../../utils/salaryShiftPeriods');
 const {
   uploadBufferToYandexDisk,
@@ -42,7 +47,10 @@ function getYandexArchiveConfig() {
     driversFolder: process.env.YANDEX_ARCHIVE_DRIVERS || 'Водители',
     registryFolder: process.env.YANDEX_ARCHIVE_REGISTRY || 'Реестры',
     financeFolder: process.env.YANDEX_ARCHIVE_FINANCE || 'Финансы',
-    salaryFolder: process.env.YANDEX_ARCHIVE_SALARY || 'Зарплата',
+    earningsFolder:
+      process.env.YANDEX_ARCHIVE_EARNINGS ||
+      process.env.YANDEX_ARCHIVE_SALARY ||
+      'Заработок',
   };
 }
 
@@ -296,41 +304,67 @@ async function syncMonthlyReportsToYandex({ months = 2 } = {}) {
   return { uploaded };
 }
 
-function prepareSalaryShiftWorkbooks(shifts) {
-  return shifts.map((shift) => ({
-    shift,
-    workbook: buildSalaryTimesheetWorkbook(db, {
-      dateFrom: shift.dateFrom,
-      dateTo: shift.dateTo,
-      driverId: null,
-    }),
-  }));
+function prepareDriverEarningsPayloads(shifts, drivers) {
+  const payloads = [];
+
+  for (const shift of shifts) {
+    for (const driver of drivers) {
+      const report = buildDriverEarningsReport(
+        db,
+        driver.driver_id,
+        shift.dateFrom,
+        shift.dateTo
+      );
+      if (!report) continue;
+
+      const hasData =
+        report.trips.length > 0 ||
+        report.compensations.length > 0 ||
+        report.payments.length > 0;
+      if (!hasData) continue;
+
+      payloads.push({
+        shift,
+        driver,
+        filename: shiftArchiveFilename(shift),
+        workbook: buildDriverEarningsWorkbook(report),
+        report,
+      });
+    }
+  }
+
+  return payloads;
 }
 
-async function uploadSalaryShiftWorkbooks(config, preparedSalary) {
+async function uploadDriverEarningsPayloads(config, preparedItems) {
   const uploaded = [];
-  for (const item of preparedSalary) {
+  for (const item of preparedItems) {
+    const driverFolder = `Водитель - ${sanitizePathSegment(item.driver.driver_name, 'Без имени')}`;
+    const remoteFolder = `${config.root}/${config.earningsFolder}/${driverFolder}`;
     const buffer = await workbookToBuffer(item.workbook);
     const result = await uploadBufferToYandexDisk({
       token: config.token,
       buffer,
-      remoteFolder: `${config.root}/${config.salaryFolder}`,
-      filename: item.shift.filename,
+      remoteFolder,
+      filename: item.filename,
       contentType:
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
     uploaded.push({
+      driver: item.driver.driver_name,
       shift: item.shift.shift,
       period: `${item.shift.dateFrom} — ${item.shift.dateTo}`,
-      title: item.shift.title,
+      filename: item.filename,
       path: result.path,
+      total_earnings: item.report.summary.total_earnings,
+      debt: item.report.summary.debt,
       sizeBytes: result.sizeBytes,
     });
   }
   return { uploaded };
 }
 
-async function syncSalaryShiftsToYandex({ shifts = null, fullRecent = false } = {}) {
+async function syncDriverEarningsToYandex({ shifts = null, fullRecent = false } = {}) {
   const config = getYandexArchiveConfig();
   if (!config.enabled) {
     return { uploaded: [], skipped: true, reason: 'disabled' };
@@ -338,23 +372,22 @@ async function syncSalaryShiftsToYandex({ shifts = null, fullRecent = false } = 
 
   const shiftList =
     shifts ??
-    (fullRecent
-      ? listSalaryShiftsForArchiveSync()
-      : shiftsDueOnCalendarDay());
+    (fullRecent ? listSalaryShiftsForArchiveSync() : shiftsDueOnCalendarDay());
 
   if (!shiftList.length) {
     return { uploaded: [], skipped: true, reason: 'no_shifts_due' };
   }
 
-  const preparedSalary = prepareSalaryShiftWorkbooks(shiftList);
-  return uploadSalaryShiftWorkbooks(config, preparedSalary);
+  const drivers = fetchAllDrivers(db);
+  const prepared = prepareDriverEarningsPayloads(shiftList, drivers);
+  return uploadDriverEarningsPayloads(config, prepared);
 }
 
 async function runYandexArchiveSync({
   photos = true,
   reports = true,
-  salary = false,
-  salaryFullRecent = true,
+  earnings = false,
+  earningsFullRecent = true,
   photoLimit = 500,
 } = {}) {
   const config = getYandexArchiveConfig();
@@ -382,12 +415,15 @@ async function runYandexArchiveSync({
         }),
       }))
     : [];
-  const preparedSalary =
-    salary && salaryFullRecent
-      ? prepareSalaryShiftWorkbooks(listSalaryShiftsForArchiveSync())
+  const preparedEarnings =
+    earnings && earningsFullRecent
+      ? prepareDriverEarningsPayloads(
+          listSalaryShiftsForArchiveSync(),
+          fetchAllDrivers(db)
+        )
       : [];
 
-  const result = { ok: true, photos: null, reports: null, salary: null };
+  const result = { ok: true, photos: null, reports: null, earnings: null };
 
   if (photos) {
     let uploaded = 0;
@@ -449,8 +485,8 @@ async function runYandexArchiveSync({
     result.reports = { uploaded };
   }
 
-  if (salary && preparedSalary.length) {
-    result.salary = await uploadSalaryShiftWorkbooks(config, preparedSalary);
+  if (earnings && preparedEarnings.length) {
+    result.earnings = await uploadDriverEarningsPayloads(config, preparedEarnings);
   }
 
   return result;
@@ -462,7 +498,7 @@ module.exports = {
   queueTripPhotoArchive,
   syncAllTripPhotosToYandex,
   syncMonthlyReportsToYandex,
-  syncSalaryShiftsToYandex,
+  syncDriverEarningsToYandex,
   runYandexArchiveSync,
   formatDateFolder,
   sanitizePathSegment,

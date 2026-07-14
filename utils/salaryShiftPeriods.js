@@ -97,8 +97,23 @@ function listSalaryShiftsForArchiveSync(refDate = new Date()) {
   );
 }
 
+function shiftArchiveFilename(shift) {
+  const from = formatRuShortDate(shift.dateFrom);
+  const to = formatRuShortDate(shift.dateTo);
+  return `вахта ${from}-${to}.xlsx`;
+}
+
+function formatRuShortDate(isoDate) {
+  const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '00.00.00';
+  const [, year, month, day] = match;
+  return `${day}.${month}.${year.slice(-2)}`;
+}
+
 module.exports = {
   shiftPeriodBounds,
   shiftsDueOnCalendarDay,
   listSalaryShiftsForArchiveSync,
+  shiftArchiveFilename,
+  formatRuShortDate,
 };
