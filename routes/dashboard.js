@@ -30,28 +30,8 @@ router.get('/stats', requireRole('admin'), (_req, res) => {
 
     let totalDebt = 0;
     try {
-      const COMPLETED_TRIP =
-        "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
-      const debtRows = db
-        .prepare(
-          `SELECT
-             COALESCE(tr.accrued, 0) - COALESCE(cp.paid, 0) AS debt
-           FROM contractors c
-           LEFT JOIN (
-             SELECT o.contractor_id,
-               SUM(COALESCE(t.volume, 0) * COALESCE(o.company_rate, 0)) AS accrued
-             FROM trips t
-             JOIN orders o ON o.id = t.order_id
-             WHERE ${COMPLETED_TRIP}
-             GROUP BY o.contractor_id
-           ) tr ON tr.contractor_id = c.id
-           LEFT JOIN (
-             SELECT contractor_id, COALESCE(SUM(amount), 0) AS paid
-             FROM contractor_payments
-             GROUP BY contractor_id
-           ) cp ON cp.contractor_id = c.id`
-        )
-        .all();
+      const { DEBT_SUMMARY_SQL } = require('./contractorPayments');
+      const debtRows = db.prepare(DEBT_SUMMARY_SQL).all();
       totalDebt = debtRows.reduce((sum, row) => sum + Math.max(0, Number(row.debt) || 0), 0);
     } catch (debtError) {
       console.warn('[dashboard] debt aggregation skipped:', debtError.message);

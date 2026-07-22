@@ -385,6 +385,8 @@ function migrate(db) {
   ensureColumn(db, 'drivers', 'car_number', 'car_number TEXT');
   ensureColumn(db, 'contractors', 'type', `type TEXT NOT NULL DEFAULT 'company'`);
   ensureColumn(db, 'contractors', 'created_by', 'created_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  ensureColumn(db, 'contractors', 'opening_balance', 'opening_balance REAL NOT NULL DEFAULT 0');
+  ensureColumn(db, 'contractors', 'opening_balance_date', 'opening_balance_date TEXT');
   ensureColumn(db, 'orders', 'material', 'material TEXT');
   ensureColumn(db, 'orders', 'quantity', 'quantity REAL');
   ensureColumn(db, 'orders', 'unit', 'unit TEXT');

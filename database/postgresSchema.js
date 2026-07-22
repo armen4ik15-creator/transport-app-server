@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS contractors (
   type TEXT NOT NULL DEFAULT 'company',
   phone TEXT,
   address TEXT,
+  opening_balance REAL NOT NULL DEFAULT 0,
+  opening_balance_date TEXT,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
@@ -283,6 +285,8 @@ ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS method TEXT CHECK(method IN
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_start TEXT;
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_end TEXT;
 ALTER TABLE contractor_payments ADD COLUMN IF NOT EXISTS payment_date TEXT;
+ALTER TABLE contractors ADD COLUMN IF NOT EXISTS opening_balance REAL NOT NULL DEFAULT 0;
+ALTER TABLE contractors ADD COLUMN IF NOT EXISTS opening_balance_date TEXT;
 
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'approved';
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'admin';

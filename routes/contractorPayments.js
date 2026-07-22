@@ -72,35 +72,52 @@ router.delete('/payments/:id', (req, res) => {
 const COMPLETED_TRIP =
   "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
 
-router.get('/summary', (_req, res) => {
-  const rows = db
-    .prepare(
-      `SELECT
-         c.id AS contractor_id,
-         c.name AS contractor_name,
-         COALESCE(tr.accrued, 0) AS accrued,
-         COALESCE(cp.paid, 0) AS paid,
-         COALESCE(tr.accrued, 0) - COALESCE(cp.paid, 0) AS debt
-       FROM contractors c
-       LEFT JOIN (
-         SELECT
-           o.contractor_id,
-           SUM(COALESCE(t.volume, 0) * COALESCE(o.company_rate, 0)) AS accrued
-         FROM trips t
-         JOIN orders o ON o.id = t.order_id
-         WHERE ${COMPLETED_TRIP}
-         GROUP BY o.contractor_id
-       ) tr ON tr.contractor_id = c.id
-       LEFT JOIN (
-         SELECT contractor_id, COALESCE(SUM(amount), 0) AS paid
-         FROM contractor_payments
-         GROUP BY contractor_id
-       ) cp ON cp.contractor_id = c.id
-       ORDER BY debt DESC, c.name ASC`
-    )
-    .all();
+/**
+ * Долг = входящее сальдо + навезли после даты сальдо − оплаты после даты сальдо.
+ * Если даты сальдо нет — учитываются все рейсы и оплаты (как раньше, плюс opening_balance).
+ */
+const DEBT_SUMMARY_SQL = `
+  SELECT
+    c.id AS contractor_id,
+    c.name AS contractor_name,
+    COALESCE(c.opening_balance, 0) AS opening_balance,
+    c.opening_balance_date,
+    COALESCE(tr.accrued, 0) AS accrued,
+    COALESCE(cp.paid, 0) AS paid,
+    COALESCE(c.opening_balance, 0) + COALESCE(tr.accrued, 0) - COALESCE(cp.paid, 0) AS debt
+  FROM contractors c
+  LEFT JOIN (
+    SELECT
+      o.contractor_id,
+      SUM(COALESCE(t.volume, 0) * COALESCE(o.company_rate, 0)) AS accrued
+    FROM trips t
+    JOIN orders o ON o.id = t.order_id
+    JOIN contractors c2 ON c2.id = o.contractor_id
+    WHERE ${COMPLETED_TRIP}
+      AND (
+        c2.opening_balance_date IS NULL
+        OR SUBSTR(COALESCE(t.completed_at, t.created_at), 1, 10) >= c2.opening_balance_date
+      )
+    GROUP BY o.contractor_id
+  ) tr ON tr.contractor_id = c.id
+  LEFT JOIN (
+    SELECT
+      p.contractor_id,
+      COALESCE(SUM(p.amount), 0) AS paid
+    FROM contractor_payments p
+    JOIN contractors c3 ON c3.id = p.contractor_id
+    WHERE
+      c3.opening_balance_date IS NULL
+      OR SUBSTR(COALESCE(p.payment_date, p.created_at), 1, 10) >= c3.opening_balance_date
+    GROUP BY p.contractor_id
+  ) cp ON cp.contractor_id = c.id
+  ORDER BY debt DESC, c.name ASC
+`;
 
+router.get('/summary', (_req, res) => {
+  const rows = db.prepare(DEBT_SUMMARY_SQL).all();
   return res.json(rows);
 });
 
 module.exports = router;
+module.exports.DEBT_SUMMARY_SQL = DEBT_SUMMARY_SQL;
