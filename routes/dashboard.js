@@ -1,6 +1,8 @@
 const express = require('express');
 const db = require('../database');
 const { requireRole } = require('../middleware/auth');
+const { DEBT_SUMMARY_SQL } = require('./contractorPayments');
+const { getCompanyCashSummary } = require('../services/companyCash');
 
 const router = express.Router();
 
@@ -30,12 +32,18 @@ router.get('/stats', requireRole('admin'), (_req, res) => {
 
     let totalDebt = 0;
     try {
-      const { DEBT_SUMMARY_SQL } = require('./contractorPayments');
       const debtRows = db.prepare(DEBT_SUMMARY_SQL).all();
       totalDebt = debtRows.reduce((sum, row) => sum + Math.max(0, Number(row.debt) || 0), 0);
     } catch (debtError) {
       console.warn('[dashboard] debt aggregation skipped:', debtError.message);
       totalDebt = 0;
+    }
+
+    let cashSummary = null;
+    try {
+      cashSummary = getCompanyCashSummary();
+    } catch (cashError) {
+      console.warn('[dashboard] cash summary skipped:', cashError.message);
     }
 
     const recentOrders = db
@@ -47,6 +55,7 @@ router.get('/stats', requireRole('admin'), (_req, res) => {
       drivers_online: Number(driversOnlineRow?.count) || 0,
       unread_notifications: Number(unreadRow?.count) || 0,
       total_debt: totalDebt,
+      cash_summary: cashSummary,
       recent_orders: recentOrders,
     });
   } catch (error) {

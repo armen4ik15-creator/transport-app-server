@@ -125,6 +125,7 @@ function mountRoutes() {
   const earningsRoutes = require('./routes/earnings');
   const salaryRoutes = require('./routes/salary');
   const contractorPaymentsRoutes = require('./routes/contractorPayments');
+  const companyCashRoutes = require('./routes/companyCash');
   const backupsRoutes = require('./routes/backups');
   const { router: publicAppRoutes } = require('./routes/publicApp');
   const dashboardRoutes = require('./routes/dashboard');
@@ -146,6 +147,7 @@ function mountRoutes() {
   app.use('/api/contractors', contractorsRoutes);
   app.use('/api/orders', ordersRoutes);
   app.use('/api/finances', financesRoutes);
+  app.use('/api/finance', companyCashRoutes);
   app.use('/api/documents', documentsRoutes);
   app.use('/api/templates', templatesRoutes);
   app.use('/api/order-templates', orderTemplatesRoutes);

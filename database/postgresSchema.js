@@ -344,6 +344,13 @@ CREATE TABLE IF NOT EXISTS fuel_sync_logs (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS company_cash_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  opening_cash_balance REAL NOT NULL DEFAULT 0,
+  opening_cash_date TEXT,
+  updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
 CREATE INDEX IF NOT EXISTS idx_fuel_cards_driver ON fuel_cards(driver_id);
 CREATE INDEX IF NOT EXISTS idx_fuel_transactions_driver ON fuel_transactions(driver_id);
 CREATE INDEX IF NOT EXISTS idx_fuel_transactions_date ON fuel_transactions(transaction_at);
