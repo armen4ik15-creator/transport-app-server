@@ -341,6 +341,29 @@ function migrate(db) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS imprest_holders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      role_note TEXT,
+      opening_balance REAL NOT NULL DEFAULT 0,
+      opening_balance_date TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS imprest_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      holder_id INTEGER NOT NULL REFERENCES imprest_holders(id) ON DELETE CASCADE,
+      move_date TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      amount REAL NOT NULL,
+      comment TEXT,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_imprest_movements_holder ON imprest_movements(holder_id);
+
     CREATE INDEX IF NOT EXISTS idx_fuel_cards_driver ON fuel_cards(driver_id);
     CREATE INDEX IF NOT EXISTS idx_fuel_transactions_driver ON fuel_transactions(driver_id);
     CREATE INDEX IF NOT EXISTS idx_fuel_transactions_date ON fuel_transactions(transaction_at);

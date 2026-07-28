@@ -1,4 +1,5 @@
 const db = require('../database');
+const { getImprestTotals, ensureImprestTables } = require('./imprest');
 
 function ensureCompanyCashSettings() {
   const row = db.prepare('SELECT id FROM company_cash_settings WHERE id = 1').get();
@@ -105,8 +106,34 @@ function getCompanyCashSummary() {
     driverPayOut = Number(driverRow?.total ?? 0);
   }
 
+  let imprestOutstanding = 0;
+  let imprestFlowSinceOpening = 0;
+  try {
+    ensureImprestTables();
+    const totals = getImprestTotals();
+    imprestOutstanding = Number(totals.outstanding || 0);
+    if (openingDate) {
+      const flowRow = db
+        .prepare(
+          `SELECT
+             COALESCE(SUM(CASE WHEN kind = 'issue' THEN amount ELSE 0 END), 0) AS issued,
+             COALESCE(SUM(CASE WHEN kind IN ('report', 'return') THEN amount ELSE 0 END), 0) AS closed
+           FROM imprest_movements
+           WHERE date(move_date) >= date(?)`
+        )
+        .get(openingDate);
+      imprestFlowSinceOpening =
+        Number(flowRow?.issued || 0) - Number(flowRow?.closed || 0);
+    }
+  } catch {
+    imprestOutstanding = 0;
+    imprestFlowSinceOpening = 0;
+  }
+
   const opening = Number(settings.opening_cash_balance ?? 0);
-  const estimatedBalance = opening + paymentsIn - expensesOut - driverPayOut;
+  // Оценка р/с: открытия + оплаты − расходы − зарплаты − выдачи под отчёт с даты открытия
+  const estimatedBalance =
+    opening + paymentsIn - expensesOut - driverPayOut - imprestFlowSinceOpening;
 
   return {
     opening_cash_balance: opening,
@@ -114,6 +141,8 @@ function getCompanyCashSummary() {
     payments_in: paymentsIn,
     expenses_out: expensesOut,
     driver_payments_out: driverPayOut,
+    imprest_outstanding: imprestOutstanding,
+    imprest_flow_since_opening: imprestFlowSinceOpening,
     estimated_cash_balance: estimatedBalance,
   };
 }
