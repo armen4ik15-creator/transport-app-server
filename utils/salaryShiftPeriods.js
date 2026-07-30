@@ -120,10 +120,48 @@ function formatRuShortDate(isoDate) {
   return `${day}.${month}.${year.slice(-2)}`;
 }
 
+function listShiftsOverlappingRange(dateFrom, dateTo) {
+  const from = String(dateFrom || '').slice(0, 10);
+  const to = String(dateTo || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    return [];
+  }
+
+  const startYear = Number(from.slice(0, 4));
+  const startMonth = Number(from.slice(5, 7));
+  const endYear = Number(to.slice(0, 4));
+  const endMonth = Number(to.slice(5, 7));
+
+  const shifts = [];
+  let year = startYear;
+  let month = startMonth;
+
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    for (const shiftNum of [1, 2]) {
+      const shift = shiftPeriodBounds(year, month, shiftNum);
+      if (!shift) continue;
+      if (shift.dateTo < from || shift.dateFrom > to) continue;
+      shifts.push({
+        ...shift,
+        effectiveFrom: from > shift.dateFrom ? from : shift.dateFrom,
+        effectiveTo: to < shift.dateTo ? to : shift.dateTo,
+      });
+    }
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+
+  return shifts;
+}
+
 module.exports = {
   shiftPeriodBounds,
   shiftsDueOnCalendarDay,
   listSalaryShiftsForArchiveSync,
+  listShiftsOverlappingRange,
   shiftFolderName,
   earningsSnapshotFilename,
   shiftArchiveFilename,

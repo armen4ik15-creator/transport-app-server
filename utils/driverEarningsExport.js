@@ -3,6 +3,7 @@ const {
   COMPLETED_TRIP_SQL,
   calcDriverCompensations,
   calcDriverDeductions,
+  calcDriverSeniorAllowance,
   formatRuDate,
 } = require('./salaryCalculations');
 
@@ -143,6 +144,7 @@ function buildDriverEarningsReport(db, driverId, dateFrom, dateTo) {
   const eligibleTrips = trips.filter((trip) => trip.counted_in_salary);
   const tripEarnings = eligibleTrips.reduce((sum, trip) => sum + trip.driver_rate, 0);
   const compensationsTotal = calcDriverCompensations(db, driverId, dateFrom, dateTo);
+  const seniorAllowance = calcDriverSeniorAllowance(db, driverId, dateFrom, dateTo);
   const deductionsTotal = calcDriverDeductions(db, driverId, dateFrom, dateTo);
 
   const paidSalary = payments
@@ -157,7 +159,7 @@ function buildDriverEarningsReport(db, driverId, dateFrom, dateTo) {
     .filter((p) => p.type === 'advance')
     .reduce((sum, p) => sum + asNumber(p.amount), 0);
 
-  const gross = tripEarnings + compensationsTotal;
+  const gross = tripEarnings + compensationsTotal + seniorAllowance;
   const totalEarnings = gross;
   const debt = gross + deductionsTotal - paidSalary;
 
@@ -170,6 +172,7 @@ function buildDriverEarningsReport(db, driverId, dateFrom, dateTo) {
       ineligible_trips: trips.length - eligibleTrips.length,
       total_volume: trips.reduce((sum, trip) => sum + (trip.volume ?? 0), 0),
       trip_earnings: tripEarnings,
+      senior_allowance: seniorAllowance,
       compensations: compensationsTotal,
       bonuses,
       advances,
@@ -201,8 +204,9 @@ function buildDriverEarningsWorkbook(report) {
   summarySheet.addRow(['Не зачтено (без фото)', summary.ineligible_trips]);
   summarySheet.addRow(['Объём', summary.total_volume]);
   summarySheet.addRow(['Заработок по рейсам', summary.trip_earnings]);
+  summarySheet.addRow(['Старший (надбавка за вахты)', summary.senior_allowance]);
   summarySheet.addRow(['Компенсации (одобренные)', summary.compensations]);
-  summarySheet.addRow(['Премии / надбавки', summary.bonuses]);
+  summarySheet.addRow(['Премии (выплаты)', summary.bonuses]);
   summarySheet.addRow(['Авансы', summary.advances]);
   summarySheet.addRow(['Удержания', summary.deductions]);
   summarySheet.addRow(['Выплачено (итого)', summary.paid]);

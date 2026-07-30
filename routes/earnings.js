@@ -3,6 +3,7 @@ const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
 const {
   calcDriverCompensations,
+  calcDriverSeniorAllowance,
   COMPLETED_TRIP_SQL,
 } = require('../utils/salaryCalculations');
 
@@ -187,7 +188,13 @@ router.get('/summary', async (req, res) => {
     (sum, trip) => sum + (trip.counted_in_salary ? trip.driver_rate : 0),
     0
   );
-  const totalEarnings = estimatedIncome + expenseStats.compensations;
+  const periodFrom = from || '1970-01-01';
+  const periodTo = to || '2099-12-31';
+  const seniorAllowance =
+    driverId != null
+      ? calcDriverSeniorAllowance(db, driverId, periodFrom, periodTo)
+      : 0;
+  const totalEarnings = estimatedIncome + expenseStats.compensations + seniorAllowance;
 
   return res.json({
     total_trips: Number(tripStats.total_trips || 0),
@@ -195,6 +202,7 @@ router.get('/summary', async (req, res) => {
     ineligible_trips: ineligibleTrips,
     total_volume: Number(tripStats.total_volume || 0),
     estimated_income: estimatedIncome,
+    senior_allowance: seniorAllowance,
     actual_income: Number(financeStats.actual_income || 0),
     actual_expense: Number(financeStats.actual_expense || 0),
     actual_balance: Number((financeStats.actual_income || 0) - (financeStats.actual_expense || 0)),

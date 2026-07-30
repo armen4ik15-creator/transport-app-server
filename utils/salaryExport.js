@@ -4,13 +4,13 @@ const {
   calcDriverCompensations,
   calcDriverDeductions,
   calcDriverTripAccrued,
+  calcDriverSeniorAllowance,
   formatPeriodLabel,
   formatRuDate,
-  parseIsoDate,
   resolvePaymentPeriod,
   toIsoDate,
 } = require('./salaryCalculations');
-const { shiftPeriodBounds } = require('./salaryShiftPeriods');
+const { listShiftsOverlappingRange } = require('./salaryShiftPeriods');
 
 const COMPLETED_TRIP_SQL =
   "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
@@ -24,8 +24,9 @@ const SUMMARY_HEADERS = [
   'Начало',
   'Конец',
   'Реестр (рейсы), ₽',
+  'Старший (надбавка), ₽',
   'Компенсации, ₽',
-  'Премии / надбавки (выплаты), ₽',
+  'Премии (выплаты), ₽',
   'Удержания, ₽',
   'Итого начислено, ₽',
   'Выплачено (нал), ₽',
@@ -90,34 +91,10 @@ function addSectionTitle(sheet, label, colCount) {
 }
 
 function listShiftsInRange(dateFrom, dateTo) {
-  const start = parseIsoDate(dateFrom);
-  const end = parseIsoDate(dateTo);
-  if (!start || !end || start > end) return [];
-
-  const shifts = [];
-  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-  const last = new Date(end.getFullYear(), end.getMonth(), 1);
-
-  while (cursor <= last) {
-    const year = cursor.getFullYear();
-    const month = cursor.getMonth() + 1;
-    for (const shiftNum of [1, 2]) {
-      const shift = shiftPeriodBounds(year, month, shiftNum);
-      if (!shift) continue;
-      if (shift.dateTo < dateFrom || shift.dateFrom > dateTo) continue;
-      const from = dateFrom > shift.dateFrom ? dateFrom : shift.dateFrom;
-      const to = dateTo < shift.dateTo ? dateTo : shift.dateTo;
-      shifts.push({
-        ...shift,
-        effectiveFrom: from,
-        effectiveTo: to,
-        label: formatPeriodLabel(from, to),
-      });
-    }
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-
-  return shifts;
+  return listShiftsOverlappingRange(dateFrom, dateTo).map((shift) => ({
+    ...shift,
+    label: formatPeriodLabel(shift.effectiveFrom, shift.effectiveTo),
+  }));
 }
 
 function fetchPayments(db, { dateFrom, dateTo, driverId }) {
@@ -310,23 +287,24 @@ function buildDriverShiftRow(db, driver, shift, payments) {
   const from = shift.effectiveFrom;
   const to = shift.effectiveTo;
   const registry = calcDriverTripAccrued(db, driver.driver_id, from, to);
+  const senior = calcDriverSeniorAllowance(db, driver.driver_id, from, to);
   const compensations = calcDriverCompensations(db, driver.driver_id, from, to);
   const deductions = calcDriverDeductions(db, driver.driver_id, from, to);
   const payout = sumPaymentsForDriver(payments, driver.driver_id, from, to);
 
-  // Начислено за вахту: реестр + компенсации.
-  // Удержания и премии (выплаты bonus) — отдельно; долг как в salary/summary.
-  const accruedTotal = registry + compensations;
+  // Начислено за вахту: реестр + старший + компенсации.
+  const accruedTotal = registry + senior + compensations;
   const debt = accruedTotal + deductions - payout.paid;
 
   const comments = [];
+  if (senior > 0) comments.push(`Старший водитель ${senior.toLocaleString('ru-RU')} ₽`);
   if (payout.comment) comments.push(payout.comment);
-  if (registry <= 0 && payout.paid > 0) {
+  if (registry <= 0 && senior <= 0 && payout.paid > 0) {
     comments.push(
       'Выплата без начислений в реестре приложения (период до старта учёта или вне рейсов)'
     );
   }
-  if (registry > 0 && payout.paid <= 0) {
+  if ((registry > 0 || senior > 0) && payout.paid <= 0) {
     comments.push('Начислено, не выплачено');
   }
 
@@ -336,6 +314,7 @@ function buildDriverShiftRow(db, driver, shift, payments) {
     from,
     to,
     registry,
+    senior,
     compensations,
     bonuses: payout.bonuses,
     deductions,
@@ -348,6 +327,7 @@ function buildDriverShiftRow(db, driver, shift, payments) {
     comment: comments.join(' · '),
     hasActivity:
       registry > 0 ||
+      senior > 0 ||
       compensations > 0 ||
       deductions !== 0 ||
       payout.paid > 0,
@@ -371,6 +351,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
 
   const grand = {
     registry: 0,
+    senior: 0,
     compensations: 0,
     bonuses: 0,
     deductions: 0,
@@ -412,6 +393,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
 
     const shiftTotals = {
       registry: 0,
+      senior: 0,
       compensations: 0,
       bonuses: 0,
       deductions: 0,
@@ -433,6 +415,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
         formatRuDate(rowData.from),
         formatRuDate(rowData.to),
         rowData.registry,
+        rowData.senior,
         rowData.compensations,
         rowData.bonuses,
         rowData.deductions,
@@ -444,7 +427,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
         rowData.paymentDate,
         rowData.comment,
       ]);
-      styleMoneyCells(row, [6, 7, 8, 9, 10, 11, 12, 13, 14]);
+      styleMoneyCells(row, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
 
       Object.keys(shiftTotals).forEach((key) => {
         shiftTotals[key] += rowData[key];
@@ -454,6 +437,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
 
     if (
       shiftTotals.registry !== 0 ||
+      shiftTotals.senior !== 0 ||
       shiftTotals.compensations !== 0 ||
       shiftTotals.paid !== 0
     ) {
@@ -464,6 +448,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
         '',
         '',
         shiftTotals.registry,
+        shiftTotals.senior,
         shiftTotals.compensations,
         shiftTotals.bonuses,
         shiftTotals.deductions,
@@ -476,11 +461,16 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
         '',
       ]);
       totalRow.font = { bold: true };
-      styleMoneyCells(totalRow, [6, 7, 8, 9, 10, 11, 12, 13, 14]);
+      styleMoneyCells(totalRow, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     }
   });
 
-  if (grand.registry !== 0 || grand.paid !== 0 || grand.compensations !== 0) {
+  if (
+    grand.registry !== 0 ||
+    grand.senior !== 0 ||
+    grand.paid !== 0 ||
+    grand.compensations !== 0
+  ) {
     addSectionTitle(summary, 'ИТОГО за выбранный период', SUMMARY_HEADERS.length);
     const grandRow = summary.addRow([
       'ИТОГО',
@@ -489,6 +479,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
       '',
       '',
       grand.registry,
+      grand.senior,
       grand.compensations,
       grand.bonuses,
       grand.deductions,
@@ -501,7 +492,7 @@ function buildSalaryTimesheetWorkbook(db, { dateFrom, dateTo, driverId }) {
       '',
     ]);
     grandRow.font = { bold: true };
-    styleMoneyCells(grandRow, [6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    styleMoneyCells(grandRow, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   }
 
   // Детализация рейсов — чтобы было видно, из чего сложился реестр (напр. 134 500).

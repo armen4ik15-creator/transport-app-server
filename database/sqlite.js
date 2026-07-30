@@ -413,6 +413,7 @@ function migrate(db) {
   ensureColumn(db, 'drivers', 'medical_check_expiry', 'medical_check_expiry TEXT');
   ensureColumn(db, 'drivers', 'is_active', 'is_active INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'drivers', 'car_number', 'car_number TEXT');
+  ensureColumn(db, 'drivers', 'senior_shift_bonus', 'senior_shift_bonus REAL NOT NULL DEFAULT 0');
   ensureColumn(db, 'contractors', 'type', `type TEXT NOT NULL DEFAULT 'company'`);
   ensureColumn(db, 'contractors', 'created_by', 'created_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
   ensureColumn(db, 'contractors', 'opening_balance', 'opening_balance REAL NOT NULL DEFAULT 0');

@@ -10,7 +10,8 @@ router.use(authMiddleware);
 const DRIVER_WITH_USER = `
   SELECT
     d.id, d.user_id, d.license_number, d.license_expiry, d.medical_check_expiry,
-    d.is_active, d.car_number, d.created_at,
+    d.is_active, d.car_number, COALESCE(d.senior_shift_bonus, 0) AS senior_shift_bonus,
+    d.created_at,
     u.email, u.full_name, u.phone
   FROM drivers d
   JOIN users u ON u.id = d.user_id
@@ -38,6 +39,7 @@ router.post('/', requireRole('admin'), (req, res) => {
     license_expiry,
     medical_check_expiry,
     is_active,
+    senior_shift_bonus,
   } = req.body || {};
   if (!email || !password || !full_name) {
     return res
@@ -51,6 +53,14 @@ router.post('/', requireRole('admin'), (req, res) => {
   const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
   if (exists) return res.status(409).json({ error: 'Email уже зарегистрирован' });
 
+  let seniorBonus = 0;
+  if (senior_shift_bonus != null && senior_shift_bonus !== '') {
+    seniorBonus = Number(senior_shift_bonus);
+    if (!Number.isFinite(seniorBonus) || seniorBonus < 0) {
+      return res.status(400).json({ error: 'senior_shift_bonus должен быть числом ≥ 0' });
+    }
+  }
+
   const hash = hashPasswordSync(password);
   const driverId = db.transaction(() => {
     const u = db
@@ -63,8 +73,8 @@ router.post('/', requireRole('admin'), (req, res) => {
     const d = db
       .prepare(
         `INSERT INTO drivers
-         (user_id, license_number, license_expiry, medical_check_expiry, is_active, car_number)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         (user_id, license_number, license_expiry, medical_check_expiry, is_active, car_number, senior_shift_bonus)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         u.lastInsertRowid,
@@ -72,7 +82,8 @@ router.post('/', requireRole('admin'), (req, res) => {
         license_expiry || null,
         medical_check_expiry || null,
         is_active == null ? 1 : Number(Boolean(is_active)),
-        car_number || null
+        car_number || null,
+        seniorBonus
       );
     return d.lastInsertRowid;
   });
@@ -92,6 +103,7 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     license_expiry,
     medical_check_expiry,
     is_active,
+    senior_shift_bonus,
     password,
   } = req.body || {};
   const driver = db.prepare('SELECT id, user_id FROM drivers WHERE id = ?').get(id);
@@ -105,6 +117,18 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, driver.user_id);
   }
 
+  let nextSenior = null;
+  if (senior_shift_bonus !== undefined) {
+    if (senior_shift_bonus === null || senior_shift_bonus === '') {
+      nextSenior = 0;
+    } else {
+      nextSenior = Number(senior_shift_bonus);
+      if (!Number.isFinite(nextSenior) || nextSenior < 0) {
+        return res.status(400).json({ error: 'senior_shift_bonus должен быть числом ≥ 0' });
+      }
+    }
+  }
+
   db.prepare('UPDATE users SET full_name = COALESCE(?, full_name), phone = ? WHERE id = ?').run(
     full_name ?? null,
     phone ?? null,
@@ -116,7 +140,8 @@ router.put('/:id', requireRole('admin'), (req, res) => {
          license_number = ?,
          license_expiry = ?,
          medical_check_expiry = ?,
-         is_active = COALESCE(?, is_active)
+         is_active = COALESCE(?, is_active),
+         senior_shift_bonus = COALESCE(?, senior_shift_bonus)
      WHERE id = ?`
   ).run(
     car_number ?? null,
@@ -124,6 +149,7 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     license_expiry ?? null,
     medical_check_expiry ?? null,
     is_active == null ? null : Number(Boolean(is_active)),
+    nextSenior,
     id
   );
   const updated = db.prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`).get(id);

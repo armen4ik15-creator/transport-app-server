@@ -107,6 +107,63 @@ function calcDriverDeductions(db, driverId, dateFrom, dateTo) {
   return asNumber(row?.total);
 }
 
+function getDriverSeniorShiftBonus(db, driverId) {
+  if (!driverId) return 0;
+  try {
+    const row = db
+      .prepare(
+        `SELECT COALESCE(senior_shift_bonus, 0) AS senior_shift_bonus
+         FROM drivers WHERE id = ?`
+      )
+      .get(driverId);
+    return asNumber(row?.senior_shift_bonus);
+  } catch {
+    return 0;
+  }
+}
+
+function driverHasCompletedTripsInPeriod(db, driverId, dateFrom, dateTo) {
+  if (!driverId || !dateFrom || !dateTo) return false;
+  const row = db
+    .prepare(
+      `SELECT 1 AS ok
+       FROM trips t
+       WHERE t.driver_id = ?
+         AND ${COMPLETED_TRIP_SQL}
+         AND date(COALESCE(t.completed_at, t.created_at)) >= date(?)
+         AND date(COALESCE(t.completed_at, t.created_at)) <= date(?)
+       LIMIT 1`
+    )
+    .get(driverId, dateFrom, dateTo);
+  return Boolean(row);
+}
+
+/**
+ * Надбавка «старший водитель»: senior_shift_bonus × число вахт в периоде,
+ * в которых у водителя был хотя бы один завершённый рейс.
+ */
+function calcDriverSeniorAllowance(db, driverId, dateFrom, dateTo) {
+  const perShift = getDriverSeniorShiftBonus(db, driverId);
+  if (perShift <= 0 || !dateFrom || !dateTo) return 0;
+
+  const { listShiftsOverlappingRange } = require('./salaryShiftPeriods');
+  const shifts = listShiftsOverlappingRange(dateFrom, dateTo);
+  let total = 0;
+  for (const shift of shifts) {
+    if (
+      driverHasCompletedTripsInPeriod(
+        db,
+        driverId,
+        shift.effectiveFrom,
+        shift.effectiveTo
+      )
+    ) {
+      total += perShift;
+    }
+  }
+  return total;
+}
+
 function calcDriverCompensations(db, driverId, dateFrom, dateTo) {
   if (!driverId || !dateFrom || !dateTo) return 0;
 
@@ -240,6 +297,8 @@ module.exports = {
   calcDriverCompensations,
   calcDriverDeductions,
   calcDriverPayouts,
+  calcDriverSeniorAllowance,
+  getDriverSeniorShiftBonus,
   formatPeriodLabel,
   formatRuDate,
   monthBoundsFromIso,
