@@ -122,22 +122,6 @@ function getDriverSeniorShiftBonus(db, driverId) {
   }
 }
 
-function driverHasCompletedTripsInPeriod(db, driverId, dateFrom, dateTo) {
-  if (!driverId || !dateFrom || !dateTo) return false;
-  const row = db
-    .prepare(
-      `SELECT 1 AS ok
-       FROM trips t
-       WHERE t.driver_id = ?
-         AND ${COMPLETED_TRIP_SQL}
-         AND date(COALESCE(t.completed_at, t.created_at)) >= date(?)
-         AND date(COALESCE(t.completed_at, t.created_at)) <= date(?)
-       LIMIT 1`
-    )
-    .get(driverId, dateFrom, dateTo);
-  return Boolean(row);
-}
-
 /**
  * Надбавка «старший водитель»: senior_shift_bonus × число вахт в периоде,
  * в которых у водителя был хотя бы один завершённый рейс.
@@ -146,22 +130,24 @@ function calcDriverSeniorAllowance(db, driverId, dateFrom, dateTo) {
   const perShift = getDriverSeniorShiftBonus(db, driverId);
   if (perShift <= 0 || !dateFrom || !dateTo) return 0;
 
-  const { listShiftsOverlappingRange } = require('./salaryShiftPeriods');
-  const shifts = listShiftsOverlappingRange(dateFrom, dateTo);
-  let total = 0;
-  for (const shift of shifts) {
-    if (
-      driverHasCompletedTripsInPeriod(
-        db,
-        driverId,
-        shift.effectiveFrom,
-        shift.effectiveTo
-      )
-    ) {
-      total += perShift;
-    }
-  }
-  return total;
+  // Считаем уникальные вахты по датам рейсов (без перебора всех вахт календаря).
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT
+         SUBSTR(date(COALESCE(t.completed_at, t.created_at)), 1, 7) AS year_month,
+         CASE
+           WHEN CAST(SUBSTR(date(COALESCE(t.completed_at, t.created_at)), 9, 2) AS INTEGER) <= 15
+           THEN 1 ELSE 2
+         END AS shift_num
+       FROM trips t
+       WHERE t.driver_id = ?
+         AND ${COMPLETED_TRIP_SQL}
+         AND date(COALESCE(t.completed_at, t.created_at)) >= date(?)
+         AND date(COALESCE(t.completed_at, t.created_at)) <= date(?)`
+    )
+    .all(driverId, dateFrom, dateTo);
+
+  return rows.length * perShift;
 }
 
 function calcDriverCompensations(db, driverId, dateFrom, dateTo) {
