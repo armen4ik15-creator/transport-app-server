@@ -294,6 +294,8 @@ ALTER TABLE expenses ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS photo_path TEXT;
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS updated_at TEXT;
 ALTER TABLE drivers ADD COLUMN IF NOT EXISTS senior_shift_bonus REAL NOT NULL DEFAULT 0;
+ALTER TABLE company_cash_settings ADD COLUMN IF NOT EXISTS opening_fuel_card_balance REAL NOT NULL DEFAULT 0;
+ALTER TABLE company_cash_settings ADD COLUMN IF NOT EXISTS opening_fuel_card_date TEXT;
 
 CREATE TABLE IF NOT EXISTS fuel_cards (
   id SERIAL PRIMARY KEY,
@@ -349,6 +351,8 @@ CREATE TABLE IF NOT EXISTS company_cash_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   opening_cash_balance REAL NOT NULL DEFAULT 0,
   opening_cash_date TEXT,
+  opening_fuel_card_balance REAL NOT NULL DEFAULT 0,
+  opening_fuel_card_date TEXT,
   updated_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 

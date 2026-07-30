@@ -338,6 +338,8 @@ function migrate(db) {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       opening_cash_balance REAL NOT NULL DEFAULT 0,
       opening_cash_date TEXT,
+      opening_fuel_card_balance REAL NOT NULL DEFAULT 0,
+      opening_fuel_card_date TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -441,6 +443,8 @@ function migrate(db) {
   ensureColumn(db, 'expenses', 'rejection_reason', 'rejection_reason TEXT');
   ensureColumn(db, 'expenses', 'photo_path', 'photo_path TEXT');
   ensureColumn(db, 'expenses', 'updated_at', 'updated_at TEXT');
+  ensureColumn(db, 'company_cash_settings', 'opening_fuel_card_balance', 'opening_fuel_card_balance REAL NOT NULL DEFAULT 0');
+  ensureColumn(db, 'company_cash_settings', 'opening_fuel_card_date', 'opening_fuel_card_date TEXT');
 }
 
 function seedAdmin(db) {
