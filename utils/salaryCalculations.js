@@ -30,6 +30,19 @@ function asNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+/** Нормализует дату из SQLite (строка) или Postgres (Date) в YYYY-MM-DD. */
+function asIsoDate(value) {
+  if (value == null) return null;
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const match = String(value).match(/(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
 function calcDriverTripAccrued(db, driverId, dateFrom, dateTo) {
   if (!driverId || !dateFrom || !dateTo) return 0;
 
@@ -145,8 +158,8 @@ function calcDriverSeniorAllowance(db, driverId, dateFrom, dateTo) {
       )
       .get(driverId, dateFrom, dateTo);
 
-    const minDate = bounds?.min_d ? String(bounds.min_d).slice(0, 10) : null;
-    const maxDate = bounds?.max_d ? String(bounds.max_d).slice(0, 10) : null;
+    const minDate = asIsoDate(bounds?.min_d);
+    const maxDate = asIsoDate(bounds?.max_d);
     if (!minDate || !maxDate) return 0;
 
     const { listShiftsOverlappingRange } = require('./salaryShiftPeriods');
