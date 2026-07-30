@@ -74,7 +74,11 @@ function fetchTripDaily({ from, to, driverId }) {
 }
 
 function fetchExpenseDaily({ from, to, driverId }) {
-  const where = ["(e.status IS NULL OR e.status = 'approved')"];
+  // Пополнения топливной карты (fuel_card) — движение баланса карты, не расход P&L.
+  const where = [
+    "(e.status IS NULL OR e.status = 'approved')",
+    "e.exp_type != 'fuel_card'",
+  ];
   const params = [];
   if (driverId) {
     where.push('e.driver_id = ?');
