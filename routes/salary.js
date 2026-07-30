@@ -61,35 +61,40 @@ router.get('/payments', (req, res) => {
 });
 
 router.get('/accrued', async (req, res) => {
-  const driverId = Number(req.query.driver_id);
-  const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
-  const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
+  try {
+    const driverId = Number(req.query.driver_id);
+    const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
 
-  if (!Number.isFinite(driverId) || driverId <= 0) {
-    return res.status(400).json({ error: 'driver_id обязателен' });
+    if (!Number.isFinite(driverId) || driverId <= 0) {
+      return res.status(400).json({ error: 'driver_id обязателен' });
+    }
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from и to обязательны (YYYY-MM-DD)' });
+    }
+
+    const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
+    if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
+
+    const accrued = await calcDriverTripAccruedAsync(db, driverId, from, to);
+    const compensations = calcDriverCompensations(db, driverId, from, to);
+    const seniorAllowance = calcDriverSeniorAllowance(db, driverId, from, to);
+    const deductions = calcDriverDeductions(db, driverId, from, to);
+
+    return res.json({
+      driver_id: driverId,
+      from,
+      to,
+      accrued,
+      senior_allowance: seniorAllowance,
+      compensations,
+      deductions,
+      net: accrued + seniorAllowance + compensations + deductions,
+    });
+  } catch (error) {
+    console.error('[salary/accrued]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка расчёта начислений' });
   }
-  if (!from || !to) {
-    return res.status(400).json({ error: 'from и to обязательны (YYYY-MM-DD)' });
-  }
-
-  const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
-  if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
-
-  const accrued = await calcDriverTripAccruedAsync(db, driverId, from, to);
-  const compensations = calcDriverCompensations(db, driverId, from, to);
-  const seniorAllowance = calcDriverSeniorAllowance(db, driverId, from, to);
-  const deductions = calcDriverDeductions(db, driverId, from, to);
-
-  return res.json({
-    driver_id: driverId,
-    from,
-    to,
-    accrued,
-    senior_allowance: seniorAllowance,
-    compensations,
-    deductions,
-    net: accrued + seniorAllowance + compensations + deductions,
-  });
 });
 
 router.post('/payments', (req, res) => {
@@ -148,64 +153,72 @@ router.delete('/payments/:id', (req, res) => {
 });
 
 router.get('/summary', async (req, res) => {
-  const driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
-  const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
-  const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
+  try {
+    const driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
+    const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
 
-  if (!driverId || !Number.isFinite(driverId)) {
-    return res.status(400).json({ error: 'driver_id обязателен' });
+    if (!driverId || !Number.isFinite(driverId)) {
+      return res.status(400).json({ error: 'driver_id обязателен' });
+    }
+
+    const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
+    if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
+
+    const periodStart = from ?? '1970-01-01';
+    const periodEnd = to ?? '2099-12-31';
+
+    const grossTrips = await calcDriverTripAccruedAsync(db, driverId, periodStart, periodEnd);
+    const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
+    const seniorAllowance = calcDriverSeniorAllowance(db, driverId, periodStart, periodEnd);
+    const gross = grossTrips + compensations + seniorAllowance;
+    const deducted = calcDriverDeductions(db, driverId, periodStart, periodEnd);
+
+    const payments = db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
+         FROM driver_payments
+         WHERE driver_id = ?
+           AND date(COALESCE(period_end, created_at)) >= date(?)
+           AND date(COALESCE(period_start, created_at)) <= date(?)`
+      )
+      .get(driverId, periodStart, periodEnd);
+
+    const paid = Number(payments.paid || 0);
+    const debt = gross + deducted - paid;
+
+    return res.json({
+      driver_id: driverId,
+      from: periodStart,
+      to: periodEnd,
+      gross,
+      gross_trips: grossTrips,
+      senior_allowance: seniorAllowance,
+      compensations,
+      paid,
+      deducted,
+      debt,
+    });
+  } catch (error) {
+    console.error('[salary/summary]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка сводки зарплаты' });
   }
-
-  const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
-  if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
-
-  const periodStart = from ?? '1970-01-01';
-  const periodEnd = to ?? '2099-12-31';
-
-  const grossTrips = await calcDriverTripAccruedAsync(db, driverId, periodStart, periodEnd);
-  const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
-  const seniorAllowance = calcDriverSeniorAllowance(db, driverId, periodStart, periodEnd);
-  const gross = grossTrips + compensations + seniorAllowance;
-  const deducted = calcDriverDeductions(db, driverId, periodStart, periodEnd);
-
-  const payments = db
-    .prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
-       FROM driver_payments
-       WHERE driver_id = ?
-         AND date(COALESCE(period_end, created_at)) >= date(?)
-         AND date(COALESCE(period_start, created_at)) <= date(?)`
-    )
-    .get(driverId, periodStart, periodEnd);
-
-  const paid = Number(payments.paid || 0);
-  const debt = gross + deducted - paid;
-
-  return res.json({
-    driver_id: driverId,
-    gross,
-    gross_trips: grossTrips,
-    senior_allowance: seniorAllowance,
-    compensations,
-    paid,
-    deducted,
-    debt,
-  });
 });
 
 router.get('/debts', async (_req, res) => {
-  const drivers = db
-    .prepare(
-      `SELECT d.id AS driver_id, u.full_name AS driver_name, d.car_number AS driver_car_number
-       FROM drivers d
-       JOIN users u ON u.id = d.user_id
-       ORDER BY u.full_name ASC`
-    )
-    .all();
+  try {
+    const drivers = db
+      .prepare(
+        `SELECT d.id AS driver_id, u.full_name AS driver_name, d.car_number AS driver_car_number
+         FROM drivers d
+         JOIN users u ON u.id = d.user_id
+         ORDER BY u.full_name ASC`
+      )
+      .all();
 
-  const rows = await Promise.all(
-    drivers.map(async (driver) => {
+    const rows = [];
+    for (const driver of drivers) {
       const grossTrips = await calcDriverTripAccruedAsync(db, driver.driver_id, '1970-01-01', '2099-12-31');
       const compensations = calcDriverCompensations(
         db,
@@ -231,7 +244,7 @@ router.get('/debts', async (_req, res) => {
       const paid = Number(payments.paid || 0);
       const debt = gross + deducted - paid;
 
-      return {
+      rows.push({
         driver_id: driver.driver_id,
         driver_name: driver.driver_name,
         driver_car_number: driver.driver_car_number,
@@ -239,15 +252,18 @@ router.get('/debts', async (_req, res) => {
         gross_trips: grossTrips,
         senior_allowance: seniorAllowance,
         compensations,
-      paid,
-      deducted,
-      debt,
-    };
-    })
-  );
+        paid,
+        deducted,
+        debt,
+      });
+    }
 
-  rows.sort((a, b) => b.debt - a.debt || String(a.driver_name).localeCompare(String(b.driver_name)));
-  return res.json(rows);
+    rows.sort((a, b) => b.debt - a.debt || String(a.driver_name).localeCompare(String(b.driver_name)));
+    return res.json(rows);
+  } catch (error) {
+    console.error('[salary/debts]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка расчёта долгов' });
+  }
 });
 
 module.exports = router;

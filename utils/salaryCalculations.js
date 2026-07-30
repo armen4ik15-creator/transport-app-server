@@ -130,24 +130,47 @@ function calcDriverSeniorAllowance(db, driverId, dateFrom, dateTo) {
   const perShift = getDriverSeniorShiftBonus(db, driverId);
   if (perShift <= 0 || !dateFrom || !dateTo) return 0;
 
-  // Считаем уникальные вахты по датам рейсов (без перебора всех вахт календаря).
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT
-         SUBSTR(date(COALESCE(t.completed_at, t.created_at)), 1, 7) AS year_month,
-         CASE
-           WHEN CAST(SUBSTR(date(COALESCE(t.completed_at, t.created_at)), 9, 2) AS INTEGER) <= 15
-           THEN 1 ELSE 2
-         END AS shift_num
-       FROM trips t
-       WHERE t.driver_id = ?
-         AND ${COMPLETED_TRIP_SQL}
-         AND date(COALESCE(t.completed_at, t.created_at)) >= date(?)
-         AND date(COALESCE(t.completed_at, t.created_at)) <= date(?)`
-    )
-    .all(driverId, dateFrom, dateTo);
+  try {
+    // Сначала сужаем диапазон по фактическим рейсам — без перебора всего календаря.
+    const bounds = db
+      .prepare(
+        `SELECT
+           MIN(date(COALESCE(t.completed_at, t.created_at))) AS min_d,
+           MAX(date(COALESCE(t.completed_at, t.created_at))) AS max_d
+         FROM trips t
+         WHERE t.driver_id = ?
+           AND ${COMPLETED_TRIP_SQL}
+           AND date(COALESCE(t.completed_at, t.created_at)) >= date(?)
+           AND date(COALESCE(t.completed_at, t.created_at)) <= date(?)`
+      )
+      .get(driverId, dateFrom, dateTo);
 
-  return rows.length * perShift;
+    const minDate = bounds?.min_d ? String(bounds.min_d).slice(0, 10) : null;
+    const maxDate = bounds?.max_d ? String(bounds.max_d).slice(0, 10) : null;
+    if (!minDate || !maxDate) return 0;
+
+    const { listShiftsOverlappingRange } = require('./salaryShiftPeriods');
+    const shifts = listShiftsOverlappingRange(minDate, maxDate);
+    let total = 0;
+    for (const shift of shifts) {
+      const row = db
+        .prepare(
+          `SELECT 1 AS ok
+           FROM trips t
+           WHERE t.driver_id = ?
+             AND ${COMPLETED_TRIP_SQL}
+             AND date(COALESCE(t.completed_at, t.created_at)) >= date(?)
+             AND date(COALESCE(t.completed_at, t.created_at)) <= date(?)
+           LIMIT 1`
+        )
+        .get(driverId, shift.effectiveFrom, shift.effectiveTo);
+      if (row) total += perShift;
+    }
+    return total;
+  } catch (error) {
+    console.error('[salary] calcDriverSeniorAllowance failed:', error.message);
+    return 0;
+  }
 }
 
 function calcDriverCompensations(db, driverId, dateFrom, dateTo) {
