@@ -4,7 +4,7 @@ const { authMiddleware, requireRole } = require('../middleware/auth');
 const {
   calcDriverCompensations,
   calcDriverDeductions,
-  calcDriverTripAccruedAsync,
+  calcDriverTripAccrued,
   calcDriverSeniorAllowance,
   parseIsoDate,
   resolvePaymentPeriod,
@@ -76,7 +76,7 @@ router.get('/accrued', async (req, res) => {
     const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
     if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
 
-    const accrued = await calcDriverTripAccruedAsync(db, driverId, from, to);
+    const accrued = calcDriverTripAccrued(db, driverId, from, to);
     const compensations = calcDriverCompensations(db, driverId, from, to);
     const seniorAllowance = calcDriverSeniorAllowance(db, driverId, from, to);
     const deductions = calcDriverDeductions(db, driverId, from, to);
@@ -168,7 +168,7 @@ router.get('/summary', async (req, res) => {
     const periodStart = from ?? '1970-01-01';
     const periodEnd = to ?? '2099-12-31';
 
-    const grossTrips = await calcDriverTripAccruedAsync(db, driverId, periodStart, periodEnd);
+    const grossTrips = calcDriverTripAccrued(db, driverId, periodStart, periodEnd);
     const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
     const seniorAllowance = calcDriverSeniorAllowance(db, driverId, periodStart, periodEnd);
     const gross = grossTrips + compensations + seniorAllowance;
@@ -219,7 +219,7 @@ router.get('/debts', async (_req, res) => {
 
     const rows = [];
     for (const driver of drivers) {
-      const grossTrips = await calcDriverTripAccruedAsync(db, driver.driver_id, '1970-01-01', '2099-12-31');
+      const grossTrips = calcDriverTripAccrued(db, driver.driver_id, '1970-01-01', '2099-12-31');
       const compensations = calcDriverCompensations(
         db,
         driver.driver_id,
