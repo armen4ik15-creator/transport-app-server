@@ -124,6 +124,7 @@ function getCompanyCashSummary() {
 
   let paymentsIn = 0;
   let expensesOut = 0;
+  let otherInflows = 0;
   let fuelFills = 0;
   let fuelCardTopups = 0;
   let driverPayOut = 0;
@@ -138,8 +139,11 @@ function getCompanyCashSummary() {
       .get(openingDate);
     paymentsIn = Number(paymentsRow?.total ?? 0);
 
-    // р/с: все расходы кроме заправок по карте (они списываются с кошелька ТК)
-    expensesOut = sumExpensesSince(openingDate, { excludeTypes: ['fuel'] });
+    // р/с: расходы кроме заправок по карте и кроме приходов (loan_return)
+    expensesOut = sumExpensesSince(openingDate, {
+      excludeTypes: ['fuel', 'loan_return'],
+    });
+    otherInflows = sumExpensesSince(openingDate, { onlyTypes: ['loan_return'] });
     fuelFills = sumExpensesSince(openingDate, { onlyTypes: ['fuel'] });
     fuelCardTopups = sumExpensesSince(openingDate, { onlyTypes: ['fuel_card'] });
 
@@ -181,10 +185,17 @@ function getCompanyCashSummary() {
   const opening = Number(settings.opening_cash_balance ?? 0);
   const fuelOpening = Number(settings.opening_fuel_card_balance ?? 0);
 
-  // Оценка р/с: открытие + оплаты − расходы р/с (в т.ч. пополнения ТК) − зарплаты − подотчёт
+  // Оценка р/с: открытие + оплаты контрагентов + прочие приходы (возврат займа и т.п.)
+  // − расходы р/с (в т.ч. пополнения ТК) − зарплаты − подотчёт.
   // Заправки (fuel) НЕ вычитаем — они уже оплачены с баланса топливной карты.
+  // loan_return НЕ является оплатой контрагента и не уменьшает его долг.
   const estimatedBalance =
-    opening + paymentsIn - expensesOut - driverPayOut - imprestFlowSinceOpening;
+    opening +
+    paymentsIn +
+    otherInflows -
+    expensesOut -
+    driverPayOut -
+    imprestFlowSinceOpening;
 
   // Кошелёк ТК: входящий остаток + пополнения − заправки
   const estimatedFuelCardBalance = fuelOpening + fuelCardTopups - fuelFills;
@@ -193,6 +204,7 @@ function getCompanyCashSummary() {
     opening_cash_balance: opening,
     opening_cash_date: openingDate,
     payments_in: paymentsIn,
+    other_inflows: otherInflows,
     expenses_out: expensesOut,
     fuel_fills: fuelFills,
     fuel_card_topups: fuelCardTopups,

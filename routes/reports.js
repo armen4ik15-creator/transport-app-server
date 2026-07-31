@@ -74,10 +74,11 @@ function fetchTripDaily({ from, to, driverId }) {
 }
 
 function fetchExpenseDaily({ from, to, driverId }) {
-  // Пополнения топливной карты (fuel_card) — движение баланса карты, не расход P&L.
+  // Пополнения ТК и возврат займа — не операционный расход P&L.
   const where = [
     "(e.status IS NULL OR e.status = 'approved')",
     "e.exp_type != 'fuel_card'",
+    "e.exp_type != 'loan_return'",
   ];
   const params = [];
   if (driverId) {
