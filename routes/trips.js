@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const multer = require('multer');
 const db = require('../database');
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, requireRole } = require('../middleware/auth');
 const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { deleteStoredUpload } = require('../utils/uploadsStorage');
 const { persistUploadMirror } = require('../utils/uploadPersistence');
@@ -723,6 +723,85 @@ router.delete('/:id', (req, res) => {
 
   db.prepare('DELETE FROM trips WHERE id = ?').run(id);
   return res.json({ ok: true, message: 'Рейс удалён' });
+});
+
+/**
+ * Admin-only: create completed trips with historical timestamps.
+ * Body: { trips: [{ order_id, ttn_number, volume, trip_at, note? }] }
+ * trip_at: ISO date/time used for created_at and completed_at.
+ */
+router.post('/backfill', requireRole('admin'), async (req, res) => {
+  const items = Array.isArray(req.body?.trips) ? req.body.trips : null;
+  if (!items || items.length === 0) {
+    return res.status(400).json({ error: 'trips[] обязателен' });
+  }
+  if (items.length > 200) {
+    return res.status(400).json({ error: 'Не более 200 рейсов за раз' });
+  }
+
+  const created = [];
+  const skipped = [];
+
+  for (const raw of items) {
+    const orderId = Number(raw?.order_id);
+    const ttn = raw?.ttn_number != null ? String(raw.ttn_number).trim() : '';
+    const volume = parseOptionalNumber(raw?.volume);
+    const note = raw?.note != null ? String(raw.note).trim() : null;
+    const tripAtRaw = raw?.trip_at != null ? String(raw.trip_at).trim() : '';
+
+    if (!Number.isFinite(orderId) || orderId <= 0) {
+      skipped.push({ ttn, reason: 'order_id обязателен' });
+      continue;
+    }
+    if (!ttn) {
+      skipped.push({ ttn, reason: 'ttn_number обязателен' });
+      continue;
+    }
+    if (!tripAtRaw || Number.isNaN(Date.parse(tripAtRaw))) {
+      skipped.push({ ttn, reason: 'trip_at должен быть валидной датой' });
+      continue;
+    }
+
+    const order = db.prepare('SELECT id, driver_id FROM orders WHERE id = ?').get(orderId);
+    if (!order) {
+      skipped.push({ ttn, reason: 'заказ не найден' });
+      continue;
+    }
+    if (!order.driver_id) {
+      skipped.push({ ttn, reason: 'у заказа нет водителя' });
+      continue;
+    }
+
+    const duplicate = findDuplicateTtn(ttn);
+    if (duplicate) {
+      skipped.push({ ttn, reason: 'ТТН уже есть', trip_id: duplicate.id });
+      continue;
+    }
+
+    const tripAt = new Date(tripAtRaw).toISOString();
+    const result = db
+      .prepare(
+        `INSERT INTO trips
+         (order_id, driver_id, stage, status, ttn_number, volume, note, photo_path, created_by, created_at, completed_at)
+         VALUES (?, ?, 'unloading', 'completed', ?, ?, ?, NULL, ?, ?, ?)`
+      )
+      .run(orderId, order.driver_id, ttn, volume, note, req.user.id, tripAt, tripAt);
+
+    created.push({
+      id: result.lastInsertRowid,
+      ttn_number: ttn,
+      order_id: orderId,
+      driver_id: order.driver_id,
+      trip_at: tripAt,
+    });
+  }
+
+  return res.status(201).json({
+    created_count: created.length,
+    skipped_count: skipped.length,
+    created,
+    skipped,
+  });
 });
 
 module.exports = router;

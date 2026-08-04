@@ -256,6 +256,29 @@ router.post('/change-password', authMiddleware, (req, res) => {
   return res.json({ ok: true, message: 'Пароль изменён' });
 });
 
+function normalizePhoneDigits(raw) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+function findUserByLogin(loginRaw) {
+  const normalizedEmail = String(loginRaw || '').trim().toLowerCase();
+  if (normalizedEmail) {
+    const byEmail = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+    if (byEmail) return byEmail;
+  }
+
+  const digits = normalizePhoneDigits(loginRaw);
+  if (digits.length < 10) return null;
+
+  const needle = digits.slice(-10);
+  const candidates = db
+    .prepare('SELECT * FROM users WHERE phone IS NOT NULL AND TRIM(phone) != \'\'')
+    .all();
+  return (
+    candidates.find((row) => normalizePhoneDigits(row.phone).endsWith(needle)) || null
+  );
+}
+
 router.post('/login', (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
@@ -287,7 +310,7 @@ router.post('/login', (req, res) => {
     });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+  const user = findUserByLogin(email);
   if (!user) return res.status(401).json({ error: 'Неверный email или пароль' });
   if (!comparePasswordSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Неверный email или пароль' });

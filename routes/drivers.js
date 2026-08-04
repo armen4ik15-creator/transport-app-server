@@ -96,6 +96,7 @@ router.post('/', requireRole('admin'), (req, res) => {
 router.put('/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
   const {
+    email,
     full_name,
     phone,
     car_number,
@@ -115,6 +116,18 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     }
     const hash = hashPasswordSync(String(password));
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, driver.user_id);
+  }
+
+  if (email != null && String(email).trim()) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ error: 'Укажите корректный email (например driver@mail.ru)' });
+    }
+    const taken = db
+      .prepare('SELECT id FROM users WHERE email = ? AND id != ?')
+      .get(normalizedEmail, driver.user_id);
+    if (taken) return res.status(409).json({ error: 'Email уже зарегистрирован' });
+    db.prepare('UPDATE users SET email = ? WHERE id = ?').run(normalizedEmail, driver.user_id);
   }
 
   let nextSenior = null;
