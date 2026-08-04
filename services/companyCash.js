@@ -96,7 +96,10 @@ function updateCompanyCashSettings(patch) {
   return getCompanyCashSettings();
 }
 
-function sumExpensesSince(openingDate, { excludeTypes = [], onlyTypes = null } = {}) {
+function sumExpensesSince(
+  openingDate,
+  { excludeTypes = [], onlyTypes = null, commentLike = null, commentNotLike = null } = {}
+) {
   const where = [
     '(status IS NULL OR status = \'approved\')',
     'date(exp_date) >= date(?)',
@@ -110,6 +113,14 @@ function sumExpensesSince(openingDate, { excludeTypes = [], onlyTypes = null } =
   for (const type of excludeTypes) {
     where.push('exp_type != ?');
     params.push(type);
+  }
+  if (commentLike) {
+    where.push('comment LIKE ?');
+    params.push(`%${commentLike}%`);
+  }
+  if (commentNotLike) {
+    where.push('(comment IS NULL OR comment NOT LIKE ?)');
+    params.push(`%${commentNotLike}%`);
   }
 
   const row = db
@@ -127,6 +138,8 @@ function getCompanyCashSummary() {
   let otherInflows = 0;
   let fuelFills = 0;
   let fuelCardTopups = 0;
+  let pprTopups = 0;
+  let pprFills = 0;
   let driverPayOut = 0;
 
   if (openingDate) {
@@ -144,8 +157,24 @@ function getCompanyCashSummary() {
       excludeTypes: ['fuel', 'loan_return'],
     });
     otherInflows = sumExpensesSince(openingDate, { onlyTypes: ['loan_return'] });
-    fuelFills = sumExpensesSince(openingDate, { onlyTypes: ['fuel'] });
-    fuelCardTopups = sumExpensesSince(openingDate, { onlyTypes: ['fuel_card'] });
+
+    // Opti / ГПН — отдельно от ППР
+    fuelFills = sumExpensesSince(openingDate, {
+      onlyTypes: ['fuel'],
+      commentLike: '[opti-fuel-',
+    });
+    fuelCardTopups = sumExpensesSince(openingDate, {
+      onlyTypes: ['fuel_card'],
+      commentNotLike: '[ppr-topup-',
+    });
+    pprTopups = sumExpensesSince(openingDate, {
+      onlyTypes: ['fuel_card'],
+      commentLike: '[ppr-topup-',
+    });
+    pprFills = sumExpensesSince(openingDate, {
+      onlyTypes: ['fuel'],
+      commentLike: '[ppr-fuel-',
+    });
 
     const driverRow = db
       .prepare(
@@ -197,8 +226,10 @@ function getCompanyCashSummary() {
     driverPayOut -
     imprestFlowSinceOpening;
 
-  // Кошелёк ТК: входящий остаток + пополнения − заправки
+  // Кошелёк Opti/ГПН
   const estimatedFuelCardBalance = fuelOpening + fuelCardTopups - fuelFills;
+  // Кошелёк ППР (входящий остаток пока 0, пока не зададим отдельно)
+  const estimatedPprBalance = pprTopups - pprFills;
 
   return {
     opening_cash_balance: opening,
@@ -208,6 +239,9 @@ function getCompanyCashSummary() {
     expenses_out: expensesOut,
     fuel_fills: fuelFills,
     fuel_card_topups: fuelCardTopups,
+    ppr_topups: pprTopups,
+    ppr_fills: pprFills,
+    estimated_ppr_balance: estimatedPprBalance,
     opening_fuel_card_balance: fuelOpening,
     opening_fuel_card_date: settings.opening_fuel_card_date,
     estimated_fuel_card_balance: estimatedFuelCardBalance,
