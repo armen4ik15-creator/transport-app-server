@@ -96,9 +96,27 @@ function updateCompanyCashSettings(patch) {
   return getCompanyCashSettings();
 }
 
+/**
+ * Sum approved expenses since opening date.
+ * @param {object} opts
+ * @param {string[]} [opts.excludeTypes]
+ * @param {string[]|null} [opts.onlyTypes]
+ * @param {string|null} [opts.commentLike]
+ * @param {string|null} [opts.commentNotLike]
+ * @param {'cash'|'noncash'|'any'|'unset'|null} [opts.method]
+ *   - cash / noncash: exact method
+ *   - unset: method IS NULL or empty (P&L-only / reimbursed off р/с)
+ *   - any / null: no method filter
+ */
 function sumExpensesSince(
   openingDate,
-  { excludeTypes = [], onlyTypes = null, commentLike = null, commentNotLike = null } = {}
+  {
+    excludeTypes = [],
+    onlyTypes = null,
+    commentLike = null,
+    commentNotLike = null,
+    method = null,
+  } = {}
 ) {
   const where = [
     '(status IS NULL OR status = \'approved\')',
@@ -122,6 +140,12 @@ function sumExpensesSince(
     where.push('(comment IS NULL OR comment NOT LIKE ?)');
     params.push(`%${commentNotLike}%`);
   }
+  if (method === 'cash' || method === 'noncash') {
+    where.push('method = ?');
+    params.push(method);
+  } else if (method === 'unset') {
+    where.push("(method IS NULL OR TRIM(method) = '')");
+  }
 
   const row = db
     .prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE ${where.join(' AND ')}`)
@@ -134,7 +158,9 @@ function getCompanyCashSummary() {
   const openingDate = settings.opening_cash_date;
 
   let paymentsIn = 0;
-  let expensesOut = 0;
+  let bankSettlementOut = 0;
+  let cashDeskOut = 0;
+  let offSettlementExpenses = 0;
   let otherInflows = 0;
   let fuelFills = 0;
   let fuelCardTopups = 0;
@@ -152,13 +178,23 @@ function getCompanyCashSummary() {
       .get(openingDate);
     paymentsIn = Number(paymentsRow?.total ?? 0);
 
-    // р/с: расходы кроме заправок по карте и кроме приходов (loan_return)
-    expensesOut = sumExpensesSince(openingDate, {
+    // р/с: только безнал, который реально уходит с расчётного счёта.
+    // method пустой — не трогает р/с (возмещения через ЗП и т.п., только P&L).
+    bankSettlementOut = sumExpensesSince(openingDate, {
       excludeTypes: ['fuel', 'loan_return'],
+      method: 'noncash',
     });
+    cashDeskOut = sumExpensesSince(openingDate, {
+      excludeTypes: ['fuel', 'loan_return'],
+      method: 'cash',
+    });
+    offSettlementExpenses = sumExpensesSince(openingDate, {
+      excludeTypes: ['fuel', 'loan_return'],
+      method: 'unset',
+    });
+
     otherInflows = sumExpensesSince(openingDate, { onlyTypes: ['loan_return'] });
 
-    // Opti / ГПН — отдельно от ППР
     fuelFills = sumExpensesSince(openingDate, {
       onlyTypes: ['fuel'],
       commentLike: '[opti-fuel-',
@@ -214,21 +250,23 @@ function getCompanyCashSummary() {
   const opening = Number(settings.opening_cash_balance ?? 0);
   const fuelOpening = Number(settings.opening_fuel_card_balance ?? 0);
 
-  // Оценка р/с: открытие + оплаты контрагентов + прочие приходы (возврат займа и т.п.)
-  // − расходы р/с (в т.ч. пополнения ТК) − зарплаты − подотчёт.
-  // Заправки (fuel) НЕ вычитаем — они уже оплачены с баланса топливной карты.
-  // loan_return НЕ является оплатой контрагента и не уменьшает его долг.
+  // Движение р/с (бухгалтерски):
+  //   вход: оплаты контрагентов + прочие приходы на р/с (loan_return)
+  //   выход с р/с напрямую: method=noncash (vendor, ТК, комиссии…)
+  //   выход через «доход ИП» / кассу: method=cash + ЗП/авансы + выдача подотчёта
+  // Заправки fuel не трогают р/с (списаны с баланса ТК после пополнения).
+  // Расходы без method — только P&L (уже возмещены через ЗП / не с р/с).
+  const expensesOut = bankSettlementOut + cashDeskOut;
   const estimatedBalance =
     opening +
     paymentsIn +
     otherInflows -
-    expensesOut -
+    bankSettlementOut -
+    cashDeskOut -
     driverPayOut -
     imprestFlowSinceOpening;
 
-  // Кошелёк Opti/ГПН
   const estimatedFuelCardBalance = fuelOpening + fuelCardTopups - fuelFills;
-  // Кошелёк ППР (входящий остаток пока 0, пока не зададим отдельно)
   const estimatedPprBalance = pprTopups - pprFills;
 
   return {
@@ -236,7 +274,12 @@ function getCompanyCashSummary() {
     opening_cash_date: openingDate,
     payments_in: paymentsIn,
     other_inflows: otherInflows,
+    // backward-compatible total of settlement-hitting expense legs
     expenses_out: expensesOut,
+    bank_settlement_out: bankSettlementOut,
+    cash_desk_out: cashDeskOut,
+    // P&L-only expenses (no method) — visible for audit, not in р/с estimate
+    off_settlement_expenses: offSettlementExpenses,
     fuel_fills: fuelFills,
     fuel_card_topups: fuelCardTopups,
     ppr_topups: pprTopups,

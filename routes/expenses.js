@@ -139,6 +139,14 @@ router.post('/', upload.single('photo'), (req, res) => {
     cleanupUploadedFile(req.file);
     return res.status(400).json({ error: 'method должен быть cash или noncash' });
   }
+  // Админские расходы на р/с/кассу обязаны иметь method — иначе ломается оценка остатка.
+  // Водительские заявки без method = только P&L/компенсации, не движение р/с.
+  if (!isDriver && !method) {
+    cleanupUploadedFile(req.file);
+    return res.status(400).json({
+      error: 'Укажите method: noncash (списание с р/с) или cash (из кассы / снятия ИП)',
+    });
+  }
 
   let safeDriverId = driver_id ? Number(driver_id) : null;
   let safeCarNumber = car_number ? String(car_number).trim() : null;
