@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
+const { operatingPnLExpenseSql } = require('../utils/expenseClassification');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -74,11 +75,10 @@ function fetchTripDaily({ from, to, driverId }) {
 }
 
 function fetchExpenseDaily({ from, to, driverId }) {
-  // Пополнения ТК и возврат займа — не операционный расход P&L.
+  // P&L: без пополнений ТК, возврата займа и дивидендов.
   const where = [
     "(e.status IS NULL OR e.status = 'approved')",
-    "e.exp_type != 'fuel_card'",
-    "e.exp_type != 'loan_return'",
+    operatingPnLExpenseSql('e'),
   ];
   const params = [];
   if (driverId) {

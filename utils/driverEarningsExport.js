@@ -161,7 +161,7 @@ function buildDriverEarningsReport(db, driverId, dateFrom, dateTo) {
 
   const gross = tripEarnings + compensationsTotal + seniorAllowance;
   const totalEarnings = gross;
-  const debt = gross + deductionsTotal - paidSalary;
+  const debt = gross - deductionsTotal - paidSalary;
 
   return {
     profile,

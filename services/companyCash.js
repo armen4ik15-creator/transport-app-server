@@ -156,6 +156,7 @@ function sumExpensesSince(
 function getCompanyCashSummary() {
   const settings = getCompanyCashSettings();
   const openingDate = settings.opening_cash_date;
+  const fuelOpeningDate = settings.opening_fuel_card_date || openingDate;
 
   let paymentsIn = 0;
   let bankSettlementOut = 0;
@@ -195,23 +196,6 @@ function getCompanyCashSummary() {
 
     otherInflows = sumExpensesSince(openingDate, { onlyTypes: ['loan_return'] });
 
-    fuelFills = sumExpensesSince(openingDate, {
-      onlyTypes: ['fuel'],
-      commentLike: '[opti-fuel-',
-    });
-    fuelCardTopups = sumExpensesSince(openingDate, {
-      onlyTypes: ['fuel_card'],
-      commentNotLike: '[ppr-topup-',
-    });
-    pprTopups = sumExpensesSince(openingDate, {
-      onlyTypes: ['fuel_card'],
-      commentLike: '[ppr-topup-',
-    });
-    pprFills = sumExpensesSince(openingDate, {
-      onlyTypes: ['fuel'],
-      commentLike: '[ppr-fuel-',
-    });
-
     const driverRow = db
       .prepare(
         `SELECT COALESCE(SUM(amount), 0) AS total
@@ -221,6 +205,25 @@ function getCompanyCashSummary() {
       )
       .get(openingDate);
     driverPayOut = Number(driverRow?.total ?? 0);
+  }
+
+  if (fuelOpeningDate) {
+    fuelFills = sumExpensesSince(fuelOpeningDate, {
+      onlyTypes: ['fuel'],
+      commentLike: '[opti-fuel-',
+    });
+    fuelCardTopups = sumExpensesSince(fuelOpeningDate, {
+      onlyTypes: ['fuel_card'],
+      commentNotLike: '[ppr-topup-',
+    });
+    pprTopups = sumExpensesSince(fuelOpeningDate, {
+      onlyTypes: ['fuel_card'],
+      commentLike: '[ppr-topup-',
+    });
+    pprFills = sumExpensesSince(fuelOpeningDate, {
+      onlyTypes: ['fuel'],
+      commentLike: '[ppr-fuel-',
+    });
   }
 
   let imprestOutstanding = 0;

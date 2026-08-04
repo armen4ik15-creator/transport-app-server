@@ -1,5 +1,6 @@
 const ExcelJS = require('exceljs');
 const db = require('../database');
+const { summarizeExpensesForPnL } = require('./expenseClassification');
 
 const COMPLETED_TRIP_SQL =
   "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
@@ -21,6 +22,7 @@ const EXPENSE_TYPE_LABELS = {
   other: 'Прочие расходы',
   salary_other: 'Зарплата (прочая)',
   dividend: 'Дивиденды',
+  loan_return: 'Возврат займа (приход на р/с)',
 };
 
 const REGISTRY_HEADERS = [
@@ -287,14 +289,8 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
     'Комментарий',
   ]);
 
-  let totalExpenses = 0;
-  let driverCompensations = 0;
   expenseRows.forEach((row) => {
     const amount = asNumber(row.amount);
-    totalExpenses += amount;
-    if (row.source === 'driver') {
-      driverCompensations += amount;
-    }
     expensesSheet.addRow([
       row.row_date ?? '',
       row.driver_name ?? '',
@@ -306,6 +302,22 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
     ]);
   });
 
+  const classified = summarizeExpensesForPnL(expenseRows);
+  const operatingExpenses = classified.operating;
+  const driverCompensations = classified.driverCompensations;
+  const totalCosts = operatingExpenses + totalDriverPay;
+  const profit = totalRevenue - totalCosts;
+
+  expensesSheet.addRow([]);
+  expensesSheet.addRow([
+    '',
+    '',
+    'Итого операционных расходов (P&L)',
+    operatingExpenses,
+    '',
+    '',
+    'без пополнений ТК, возврата займа и дивидендов',
+  ]);
   expensesSheet.addRow([
     '',
     '',
@@ -315,34 +327,61 @@ function buildFinancialWorkbook(tripRows, expenseRows) {
     '',
     `${tripRows.length} рейсов`,
   ]);
-
-  if (driverCompensations > 0) {
+  if (classified.walletTransfers > 0) {
     expensesSheet.addRow([
       '',
       '',
-      'Компенсации водителям (личные расходы)',
-      driverCompensations,
-      'Одобрено',
-      'Водитель',
+      'Пополнения ТК (не P&L, перевод актива)',
+      classified.walletTransfers,
+      '',
+      '',
+      '',
+    ]);
+  }
+  if (classified.balanceSheetInflows > 0) {
+    expensesSheet.addRow([
+      '',
+      '',
+      'Возврат займа / приходы (не расход)',
+      classified.balanceSheetInflows,
+      '',
+      '',
+      '',
+    ]);
+  }
+  if (classified.equityDistributions > 0) {
+    expensesSheet.addRow([
+      '',
+      '',
+      'Дивиденды (не операционный расход)',
+      classified.equityDistributions,
+      '',
+      '',
       '',
     ]);
   }
 
-  const totalCosts = totalExpenses + totalDriverPay;
-  const profit = totalRevenue - totalCosts;
-
   const profitSheet = workbook.addWorksheet('Прибыль');
   addHeaderRow(profitSheet, ['Показатель', 'Сумма, ₽']);
   profitSheet.addRow(['Выручка (из рейсов)', totalRevenue]);
-  profitSheet.addRow(['Расходы (учёт)', totalExpenses]);
+  profitSheet.addRow(['Операционные расходы (P&L)', operatingExpenses]);
   if (driverCompensations > 0) {
     profitSheet.addRow(['в т.ч. компенсации водителям', driverCompensations]);
   }
   profitSheet.addRow(['Зарплата водителей (из рейсов)', totalDriverPay]);
-  profitSheet.addRow(['Итого расходов', totalCosts]);
-  profitSheet.addRow(['Прибыль', profit]);
+  profitSheet.addRow(['Итого расходов (P&L)', totalCosts]);
+  profitSheet.addRow(['Прибыль (P&L)', profit]);
+  if (classified.walletTransfers > 0) {
+    profitSheet.addRow(['Справочно: пополнения ТК (не в прибыли)', classified.walletTransfers]);
+  }
+  if (classified.balanceSheetInflows > 0) {
+    profitSheet.addRow(['Справочно: возврат займа / приходы', classified.balanceSheetInflows]);
+  }
+  if (classified.equityDistributions > 0) {
+    profitSheet.addRow(['Справочно: дивиденды', classified.equityDistributions]);
+  }
   profitSheet.columns.forEach((column) => {
-    column.width = 28;
+    column.width = 42;
   });
 
   return workbook;

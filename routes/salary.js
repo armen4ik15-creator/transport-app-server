@@ -89,7 +89,7 @@ router.get('/accrued', async (req, res) => {
       senior_allowance: seniorAllowance,
       compensations,
       deductions,
-      net: accrued + seniorAllowance + compensations + deductions,
+      net: accrued + seniorAllowance + compensations - deductions,
     });
   } catch (error) {
     console.error('[salary/accrued]', error);
@@ -186,7 +186,7 @@ router.get('/summary', async (req, res) => {
       .get(driverId, periodStart, periodEnd);
 
     const paid = Number(payments.paid || 0);
-    const debt = gross + deducted - paid;
+    const debt = gross - deducted - paid;
 
     return res.json({
       driver_id: driverId,
@@ -242,7 +242,7 @@ router.get('/debts', async (_req, res) => {
         )
         .get(driver.driver_id);
       const paid = Number(payments.paid || 0);
-      const debt = gross + deducted - paid;
+      const debt = gross - deducted - paid;
 
       rows.push({
         driver_id: driver.driver_id,
