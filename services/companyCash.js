@@ -258,7 +258,9 @@ function getCompanyCashSummary() {
   //   выход с р/с напрямую: method=noncash (vendor, ТК, комиссии…)
   //   выход через «доход ИП» / кассу: method=cash + ЗП/авансы + выдача подотчёта
   // Заправки fuel не трогают р/с (списаны с баланса ТК после пополнения).
-  // Расходы без method — только P&L (уже возмещены через ЗП / не с р/с).
+  // Расходы без method — только P&L (возмещения / уже закрыты через снятия ИП).
+  // ВАЖНО: method=noncash на возмещениях дал июльский разрыв ~45 тыс.
+  // (36000 возмещений + 8888.40 ложный арест).
   const expensesOut = bankSettlementOut + cashDeskOut;
   const estimatedBalance =
     opening +

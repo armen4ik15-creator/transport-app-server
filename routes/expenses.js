@@ -129,22 +129,32 @@ router.post('/', upload.single('photo'), (req, res) => {
 
   const isDriver = req.user.role !== 'admin';
   const safeExpType = (exp_type && String(exp_type).trim()) || 'other';
+  const offSettlementFlag =
+    body.off_settlement === true ||
+    body.off_settlement === 'true' ||
+    body.off_settlement === 1 ||
+    body.off_settlement === '1' ||
+    String(method || '').trim().toLowerCase() === 'none';
 
   if (isDriver && !DRIVER_EXPENSE_TYPES.has(safeExpType)) {
     cleanupUploadedFile(req.file);
     return res.status(400).json({ error: 'Недопустимый тип расхода для водителя' });
   }
 
-  if (method && !['cash', 'noncash'].includes(method)) {
-    cleanupUploadedFile(req.file);
-    return res.status(400).json({ error: 'method должен быть cash или noncash' });
-  }
-  // Админские расходы на р/с/кассу обязаны иметь method — иначе ломается оценка остатка.
-  // Водительские заявки без method = только P&L/компенсации, не движение р/с.
-  if (!isDriver && !method) {
+  if (method && !['cash', 'noncash', 'none'].includes(String(method).trim().toLowerCase())) {
     cleanupUploadedFile(req.file);
     return res.status(400).json({
-      error: 'Укажите method: noncash (списание с р/с) или cash (из кассы / снятия ИП)',
+      error: 'method: noncash (р/с), cash (касса/снятие ИП) или none (только P&L, без р/с)',
+    });
+  }
+  // Админские расходы на р/с/кассу обязаны иметь method.
+  // method=none / off_settlement=true — возмещения и P&L-only (НЕ трогают оценку р/с).
+  // Исторический баг ~45 тыс.: возмещения с method=noncash дважды били р/с.
+  if (!isDriver && !method && !offSettlementFlag) {
+    cleanupUploadedFile(req.file);
+    return res.status(400).json({
+      error:
+        'Укажите method: noncash (р/с), cash (касса/снятие ИП) или none/off_settlement (только P&L)',
     });
   }
 
@@ -180,7 +190,8 @@ router.post('/', upload.single('photo'), (req, res) => {
   if (photoPath && req.file) {
     queueUploadMirror(photoPath, { absolutePath: req.file.path, mimeType: req.file.mimetype });
   }
-  const safeMethod = isDriver ? null : method || null;
+  // Водитель и off_settlement — никогда не списывают р/с напрямую.
+  const safeMethod = isDriver || offSettlementFlag ? null : method || null;
   const timestamp = nowIso();
 
   const result = db
@@ -241,11 +252,21 @@ router.patch('/:id/review', requireRole('admin'), (req, res) => {
   }
 
   const newStatus = action === 'approve' ? 'approved' : 'rejected';
-  db.prepare(
-    `UPDATE expenses
-     SET status = ?, rejection_reason = ?, updated_at = ?
-     WHERE id = ?`
-  ).run(newStatus, rejectionReason, nowIso(), id);
+  // Возмещения водителя никогда не должны получить method cash/noncash при approve —
+  // иначе снова появится двойной удар по оценке р/с.
+  if (action === 'approve' && expense.source === 'driver') {
+    db.prepare(
+      `UPDATE expenses
+       SET status = ?, rejection_reason = ?, method = NULL, updated_at = ?
+       WHERE id = ?`
+    ).run(newStatus, rejectionReason, nowIso(), id);
+  } else {
+    db.prepare(
+      `UPDATE expenses
+       SET status = ?, rejection_reason = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(newStatus, rejectionReason, nowIso(), id);
+  }
 
   const row = db.prepare(`${EXPENSE_SELECT} WHERE e.id = ?`).get(id);
   return res.json(normalizeExpenseRow(row));
