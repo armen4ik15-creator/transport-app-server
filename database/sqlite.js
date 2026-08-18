@@ -147,6 +147,17 @@ function migrate(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS salary_shift_settlements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      note TEXT,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(driver_id, period_start, period_end)
+    );
+
     CREATE TABLE IF NOT EXISTS contractor_payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       contractor_id INTEGER NOT NULL REFERENCES contractors(id) ON DELETE CASCADE,

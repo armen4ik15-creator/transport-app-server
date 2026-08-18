@@ -129,12 +129,18 @@ router.post('/', upload.single('photo'), (req, res) => {
 
   const isDriver = req.user.role !== 'admin';
   const safeExpType = (exp_type && String(exp_type).trim()) || 'other';
+  const asCompensation =
+    body.as_compensation === true ||
+    body.as_compensation === 'true' ||
+    body.as_compensation === 1 ||
+    body.as_compensation === '1';
   const offSettlementFlag =
     body.off_settlement === true ||
     body.off_settlement === 'true' ||
     body.off_settlement === 1 ||
     body.off_settlement === '1' ||
-    String(method || '').trim().toLowerCase() === 'none';
+    String(method || '').trim().toLowerCase() === 'none' ||
+    asCompensation;
 
   if (isDriver && !DRIVER_EXPENSE_TYPES.has(safeExpType)) {
     cleanupUploadedFile(req.file);
@@ -183,6 +189,10 @@ router.post('/', upload.single('photo'), (req, res) => {
     if (!exists) {
       cleanupUploadedFile(req.file);
       return res.status(404).json({ error: 'Водитель не найден' });
+    }
+    if (asCompensation) {
+      expenseSource = 'driver';
+      expenseStatus = 'approved';
     }
   }
 

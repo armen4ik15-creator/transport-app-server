@@ -284,6 +284,18 @@ ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ref_id INTEGER;
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS method TEXT CHECK(method IN ('cash','noncash'));
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_start TEXT;
 ALTER TABLE driver_payments ADD COLUMN IF NOT EXISTS period_end TEXT;
+
+CREATE TABLE IF NOT EXISTS salary_shift_settlements (
+  id SERIAL PRIMARY KEY,
+  driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text),
+  UNIQUE(driver_id, period_start, period_end)
+);
+CREATE INDEX IF NOT EXISTS idx_salary_shift_settlements_driver ON salary_shift_settlements(driver_id);
 ALTER TABLE contractor_payments ADD COLUMN IF NOT EXISTS payment_date TEXT;
 ALTER TABLE contractors ADD COLUMN IF NOT EXISTS opening_balance REAL NOT NULL DEFAULT 0;
 ALTER TABLE contractors ADD COLUMN IF NOT EXISTS opening_balance_date TEXT;

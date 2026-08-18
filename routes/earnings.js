@@ -6,6 +6,10 @@ const {
   calcDriverSeniorAllowance,
   COMPLETED_TRIP_SQL,
 } = require('../utils/salaryCalculations');
+const {
+  enrichTripsWithSalaryPaymentStatus,
+  summarizeTripPaymentStatuses,
+} = require('../utils/tripSalaryPaymentStatus');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -125,6 +129,7 @@ router.get('/summary', async (req, res) => {
       `SELECT
          t.id,
          t.order_id,
+         t.driver_id,
          t.ttn_number,
          t.volume,
          t.photo_path,
@@ -165,23 +170,26 @@ router.get('/summary', async (req, res) => {
 
   const expenseStats = buildExpenseStats(driverId, from, to);
 
-  const trips = tripRows.map((row) => {
+  const trips = enrichTripsWithSalaryPaymentStatus(db, tripRows.map((row) => {
     const photoAvailable = Boolean(row.photo_path && String(row.photo_path).trim());
     const countedInSalary = photoAvailable;
     return {
       id: Number(row.id),
       order_id: Number(row.order_id),
+      driver_id: Number(row.driver_id),
       ttn_number: row.ttn_number ?? null,
       volume: row.volume == null ? null : Number(row.volume),
       created_at: row.created_at,
       completed_at: row.completed_at ?? null,
       driver_rate: Number(row.driver_rate || 0),
+      photo_path: row.photo_path ?? null,
       has_photos: countedInSalary,
       counted_in_salary: countedInSalary,
       photo_available: photoAvailable,
     };
-  });
+  }));
 
+  const paymentSummary = summarizeTripPaymentStatuses(trips);
   const eligibleTrips = trips.filter((trip) => trip.counted_in_salary).length;
   const ineligibleTrips = trips.length - eligibleTrips;
   const estimatedIncome = trips.reduce(
@@ -200,6 +208,10 @@ router.get('/summary', async (req, res) => {
     total_trips: Number(tripStats.total_trips || 0),
     eligible_trips: eligibleTrips,
     ineligible_trips: ineligibleTrips,
+    eligible_paid_trips: paymentSummary.eligible_paid_trips,
+    eligible_unpaid_trips: paymentSummary.eligible_unpaid_trips,
+    paid_trip_earnings: paymentSummary.paid_trip_earnings,
+    unpaid_trip_earnings: paymentSummary.unpaid_trip_earnings,
     total_volume: Number(tripStats.total_volume || 0),
     estimated_income: estimatedIncome,
     senior_allowance: seniorAllowance,

@@ -266,4 +266,113 @@ router.get('/debts', async (_req, res) => {
   }
 });
 
+const SHIFT_SETTLEMENT_SELECT = `
+  SELECT
+    s.id, s.driver_id, s.period_start, s.period_end, s.note, s.created_by, s.created_at,
+    u.full_name AS driver_name,
+    d.car_number AS driver_car_number
+  FROM salary_shift_settlements s
+  JOIN drivers d ON d.id = s.driver_id
+  JOIN users u ON u.id = d.user_id
+`;
+
+router.get('/shift-settlements', (req, res) => {
+  try {
+    const driverId = req.query.driver_id ? Number(req.query.driver_id) : null;
+    const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
+    const where = [];
+    const params = [];
+
+    if (driverId) {
+      where.push('s.driver_id = ?');
+      params.push(driverId);
+    }
+    if (from) {
+      where.push('s.period_end >= ?');
+      params.push(from);
+    }
+    if (to) {
+      where.push('s.period_start <= ?');
+      params.push(to);
+    }
+
+    const rows = db
+      .prepare(
+        `${SHIFT_SETTLEMENT_SELECT}
+         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY s.period_start DESC, s.id DESC`
+      )
+      .all(...params);
+    return res.json(rows);
+  } catch (error) {
+    console.error('[salary/shift-settlements GET]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка загрузки закрытых вахт' });
+  }
+});
+
+router.post('/shift-settlements', (req, res) => {
+  try {
+    const { driver_id, period_start, period_end, note } = req.body || {};
+    const driverId = Number(driver_id);
+    if (!Number.isFinite(driverId) || driverId <= 0) {
+      return res.status(400).json({ error: 'driver_id обязателен' });
+    }
+
+    const period = validatePeriod(period_start, period_end);
+    if (period.error) return res.status(400).json({ error: period.error });
+
+    const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(driverId);
+    if (!driver) return res.status(404).json({ error: 'Водитель не найден' });
+
+    const existing = db
+      .prepare(
+        `SELECT id FROM salary_shift_settlements
+         WHERE driver_id = ? AND period_start = ? AND period_end = ?`
+      )
+      .get(driverId, period.start, period.end);
+
+    let rowId;
+    if (existing) {
+      db.prepare(
+        `UPDATE salary_shift_settlements
+         SET note = ?, created_by = ?
+         WHERE id = ?`
+      ).run(note || null, req.user.id, existing.id);
+      rowId = existing.id;
+    } else {
+      const result = db
+        .prepare(
+          `INSERT INTO salary_shift_settlements
+           (driver_id, period_start, period_end, note, created_by)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .run(driverId, period.start, period.end, note || null, req.user.id);
+      rowId = result.lastInsertRowid;
+    }
+
+    const row = db.prepare(`${SHIFT_SETTLEMENT_SELECT} WHERE s.id = ?`).get(rowId);
+    return res.status(201).json(row);
+  } catch (error) {
+    console.error('[salary/shift-settlements POST]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка закрытия вахты' });
+  }
+});
+
+router.delete('/shift-settlements/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Некорректный id' });
+    }
+    const exists = db.prepare('SELECT id FROM salary_shift_settlements WHERE id = ?').get(id);
+    if (!exists) return res.status(404).json({ error: 'Запись не найдена' });
+    db.prepare('DELETE FROM salary_shift_settlements WHERE id = ?').run(id);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('[salary/shift-settlements DELETE]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка удаления' });
+  }
+});
+
 module.exports = router;

@@ -8,6 +8,7 @@ const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { deleteStoredUpload } = require('../utils/uploadsStorage');
 const { persistUploadMirror } = require('../utils/uploadPersistence');
 const { queueTripPhotoArchive } = require('../services/yandexArchive/yandexArchiveService');
+const { enrichTripsWithSalaryPaymentStatus } = require('../utils/tripSalaryPaymentStatus');
 
 const router = express.Router();
 
@@ -196,7 +197,8 @@ async function enrichTripRowAsync(row) {
 }
 
 async function mapTripsWithPhotoAvailability(rows) {
-  return rows.map((row) => enrichTripRowFast(row));
+  const enriched = rows.map((row) => enrichTripRowFast(row));
+  return enrichTripsWithSalaryPaymentStatus(db, enriched);
 }
 
 function extensionFromMime(mimeType) {
@@ -727,8 +729,9 @@ router.delete('/:id', (req, res) => {
 
 /**
  * Admin-only: create completed trips with historical timestamps.
- * Body: { trips: [{ order_id, ttn_number, volume, trip_at, note? }] }
+ * Body: { trips: [{ order_id, ttn_number, volume, trip_at, note? }], as_driver?: true }
  * trip_at: ISO date/time used for created_at and completed_at.
+ * as_driver: created_by = driver's user_id (appears in driver cabinet as self-entered).
  */
 router.post('/backfill', requireRole('admin'), async (req, res) => {
   const items = Array.isArray(req.body?.trips) ? req.body.trips : null;
@@ -738,6 +741,7 @@ router.post('/backfill', requireRole('admin'), async (req, res) => {
   if (items.length > 200) {
     return res.status(400).json({ error: 'Не более 200 рейсов за раз' });
   }
+  const asDriver = req.body?.as_driver === true || req.body?.as_driver === 'true';
 
   const created = [];
   const skipped = [];
@@ -778,6 +782,16 @@ router.post('/backfill', requireRole('admin'), async (req, res) => {
       continue;
     }
 
+    let createdBy = req.user.id;
+    if (asDriver) {
+      const driver = db.prepare('SELECT user_id FROM drivers WHERE id = ?').get(order.driver_id);
+      if (!driver?.user_id) {
+        skipped.push({ ttn, reason: 'у водителя нет user_id' });
+        continue;
+      }
+      createdBy = driver.user_id;
+    }
+
     const tripAt = new Date(tripAtRaw).toISOString();
     const result = db
       .prepare(
@@ -785,13 +799,14 @@ router.post('/backfill', requireRole('admin'), async (req, res) => {
          (order_id, driver_id, stage, status, ttn_number, volume, note, photo_path, created_by, created_at, completed_at)
          VALUES (?, ?, 'unloading', 'completed', ?, ?, ?, NULL, ?, ?, ?)`
       )
-      .run(orderId, order.driver_id, ttn, volume, note, req.user.id, tripAt, tripAt);
+      .run(orderId, order.driver_id, ttn, volume, note, createdBy, tripAt, tripAt);
 
     created.push({
       id: result.lastInsertRowid,
       ttn_number: ttn,
       order_id: orderId,
       driver_id: order.driver_id,
+      created_by: createdBy,
       trip_at: tripAt,
     });
   }
