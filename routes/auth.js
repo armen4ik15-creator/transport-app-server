@@ -262,9 +262,10 @@ function normalizePhoneDigits(raw) {
 
 function findUserByLogin(loginRaw) {
   const normalizedEmail = String(loginRaw || '').trim().toLowerCase();
-  if (normalizedEmail) {
+  if (normalizedEmail.includes('@')) {
     const byEmail = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
     if (byEmail) return byEmail;
+    return null;
   }
 
   const digits = normalizePhoneDigits(loginRaw);
@@ -283,31 +284,6 @@ router.post('/login', (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'email и password обязательны' });
-  }
-  const normalizedEmail = String(email).trim().toLowerCase();
-
-  const pendingAdmin = db
-    .prepare(
-      `SELECT id FROM admin_registration_requests
-       WHERE email = ? AND status = 'pending'`
-    )
-    .get(normalizedEmail);
-  if (pendingAdmin) {
-    return res.status(403).json({
-      error: 'Заявка на регистрацию ожидает одобрения администратора',
-    });
-  }
-
-  const pendingDriver = db
-    .prepare(
-      `SELECT id FROM driver_registration_requests
-       WHERE email = ? AND status = 'pending'`
-    )
-    .get(normalizedEmail);
-  if (pendingDriver) {
-    return res.status(403).json({
-      error: 'Заявка на регистрацию ожидает одобрения администратора',
-    });
   }
 
   const user = findUserByLogin(email);
