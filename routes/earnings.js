@@ -1,15 +1,7 @@
 const express = require('express');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/auth');
-const {
-  calcDriverCompensations,
-  calcDriverSeniorAllowance,
-  COMPLETED_TRIP_SQL,
-} = require('../utils/salaryCalculations');
-const {
-  enrichTripsWithSalaryPaymentStatus,
-  summarizeTripPaymentStatuses,
-} = require('../utils/tripSalaryPaymentStatus');
+const { COMPLETED_TRIP_SQL } = require('../utils/salaryCalculations');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -51,16 +43,11 @@ function buildExpenseStats(driverId, from, to) {
   const expensesApproved = Number(row?.expenses_approved || 0);
   const expensesRejected = Number(row?.expenses_rejected || 0);
 
-  let compensations = expensesApproved;
-  if (driverId && from && to) {
-    compensations = calcDriverCompensations(db, driverId, from, to);
-  }
-
   return {
     expenses_pending: expensesPending,
     expenses_approved: expensesApproved,
     expenses_rejected: expensesRejected,
-    compensations,
+    compensations: expensesApproved,
   };
 }
 
@@ -170,7 +157,7 @@ router.get('/summary', async (req, res) => {
 
   const expenseStats = buildExpenseStats(driverId, from, to);
 
-  const trips = enrichTripsWithSalaryPaymentStatus(db, tripRows.map((row) => {
+  const trips = tripRows.map((row) => {
     const photoAvailable = Boolean(row.photo_path && String(row.photo_path).trim());
     const countedInSalary = photoAvailable;
     return {
@@ -186,32 +173,29 @@ router.get('/summary', async (req, res) => {
       has_photos: countedInSalary,
       counted_in_salary: countedInSalary,
       photo_available: photoAvailable,
+      salary_payment_status: countedInSalary ? 'unpaid' : 'no_photo',
+      salary_shift_label: null,
+      salary_shift_debt: countedInSalary ? Number(row.driver_rate || 0) : null,
     };
-  }));
+  });
 
-  const paymentSummary = summarizeTripPaymentStatuses(trips);
   const eligibleTrips = trips.filter((trip) => trip.counted_in_salary).length;
   const ineligibleTrips = trips.length - eligibleTrips;
   const estimatedIncome = trips.reduce(
     (sum, trip) => sum + (trip.counted_in_salary ? trip.driver_rate : 0),
     0
   );
-  const periodFrom = from || '1970-01-01';
-  const periodTo = to || '2099-12-31';
-  const seniorAllowance =
-    driverId != null
-      ? calcDriverSeniorAllowance(db, driverId, periodFrom, periodTo)
-      : 0;
-  const totalEarnings = estimatedIncome + expenseStats.compensations + seniorAllowance;
+  const seniorAllowance = 0;
+  const totalEarnings = estimatedIncome + expenseStats.compensations;
 
   return res.json({
     total_trips: Number(tripStats.total_trips || 0),
     eligible_trips: eligibleTrips,
     ineligible_trips: ineligibleTrips,
-    eligible_paid_trips: paymentSummary.eligible_paid_trips,
-    eligible_unpaid_trips: paymentSummary.eligible_unpaid_trips,
-    paid_trip_earnings: paymentSummary.paid_trip_earnings,
-    unpaid_trip_earnings: paymentSummary.unpaid_trip_earnings,
+    eligible_paid_trips: 0,
+    eligible_unpaid_trips: eligibleTrips,
+    paid_trip_earnings: 0,
+    unpaid_trip_earnings: estimatedIncome,
     total_volume: Number(tripStats.total_volume || 0),
     estimated_income: estimatedIncome,
     senior_allowance: seniorAllowance,
