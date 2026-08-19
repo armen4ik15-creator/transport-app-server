@@ -8,7 +8,6 @@ const { UPLOADS_DIR, uploadsSubdir } = require('../config/paths');
 const { deleteStoredUpload } = require('../utils/uploadsStorage');
 const { persistUploadMirror } = require('../utils/uploadPersistence');
 const { queueTripPhotoArchive } = require('../services/yandexArchive/yandexArchiveService');
-const { enrichTripsWithSalaryPaymentStatus } = require('../utils/tripSalaryPaymentStatus');
 
 const router = express.Router();
 
@@ -197,8 +196,7 @@ async function enrichTripRowAsync(row) {
 }
 
 async function mapTripsWithPhotoAvailability(rows) {
-  const enriched = rows.map((row) => enrichTripRowFast(row));
-  return enrichTripsWithSalaryPaymentStatus(db, enriched);
+  return rows.map((row) => enrichTripRowFast(row));
 }
 
 function extensionFromMime(mimeType) {
