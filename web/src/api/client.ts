@@ -22,6 +22,10 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+export function getApiBaseUrl(): string {
+  return DEFAULT_API_URL;
+}
+
 export const api = axios.create({
   baseURL: DEFAULT_API_URL,
   timeout: 20000,
@@ -48,27 +52,76 @@ export function resolveUploadUrl(filePath: string): string {
   return `${host}${filePath.startsWith('/') ? '' : '/'}${filePath}`;
 }
 
+export function logApiError(context: string, err: unknown): void {
+  if (!axios.isAxiosError(err)) {
+    console.error(`[${context}]`, err);
+    return;
+  }
+  const axErr = err as AxiosError<{ error?: string }>;
+  const requestUrl = axErr.config?.baseURL
+    ? `${axErr.config.baseURL}${axErr.config.url ?? ''}`
+    : axErr.config?.url;
+  console.error(`[${context}]`, {
+    url: requestUrl,
+    status: axErr.response?.status ?? null,
+    code: axErr.code ?? null,
+    message: axErr.message,
+    serverError: axErr.response?.data?.error ?? null,
+  });
+}
+
 export function apiErrorMessage(err: unknown, fallback = 'Ошибка'): string {
   if (axios.isAxiosError(err)) {
     const axErr = err as AxiosError<{ error?: string }>;
-    if (axErr.response?.data?.error) return axErr.response.data.error;
-    if (axErr.code === 'ECONNABORTED') return 'Превышено время ожидания сервера';
-    if (axErr.message === 'Network Error' || axErr.message === 'Failed to fetch') {
-      return 'Нет связи с API. Проверьте интернет и что backend доступен.';
-    }
-    if (axErr.response?.status === 502) {
+    const status = axErr.response?.status;
+    const serverError = axErr.response?.data?.error;
+
+    if (serverError) return serverError;
+
+    if (status === 401) return 'Неверный email или пароль';
+    if (status === 403) return 'Доступ запрещён';
+    if (status === 404) return 'Эндпоинт не найден на сервере';
+    if (status === 500) return 'Ошибка сервера. Попробуйте через минуту.';
+    if (status === 502) {
       return 'Сервер временно недоступен (502). Подождите минуту и повторите.';
     }
-    if (axErr.response?.status === 503) {
+    if (status === 503) {
       return 'База данных временно недоступна. Попробуйте через минуту.';
     }
-    return axErr.message;
+
+    if (axErr.code === 'ECONNABORTED') {
+      return 'Превышено время ожидания сервера. Проверьте интернет и повторите.';
+    }
+
+    if (!axErr.response) {
+      if (axErr.message === 'Network Error' || axErr.message === 'Failed to fetch') {
+        return 'Не удалось связаться с сервером. Проверьте интернет, VPN и блокировщик рекламы.';
+      }
+      return 'Сервер не ответил. Проверьте доступность API в браузере.';
+    }
+
+    return axErr.message || fallback;
   }
+
   if (err instanceof Error) {
     if (err.message === 'Failed to fetch') {
-      return 'Нет связи с API. Проверьте интернет и что backend доступен.';
+      return 'Не удалось связаться с сервером. Проверьте интернет, VPN и блокировщик рекламы.';
     }
     return err.message;
   }
+
   return fallback;
+}
+
+export async function checkApiHealth(): Promise<{ ok: boolean; message: string }> {
+  const healthUrl = `${getApiHost()}/api/health`;
+  try {
+    const response = await fetch(healthUrl, { method: 'GET', cache: 'no-store' });
+    if (!response.ok) {
+      return { ok: false, message: `API health: HTTP ${response.status}` };
+    }
+    return { ok: true, message: 'API доступен' };
+  } catch {
+    return { ok: false, message: 'API недоступен из браузера' };
+  }
 }

@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { apiErrorMessage } from '../api/client';
+import { apiErrorMessage, checkApiHealth, getApiHost, logApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 
 export function LoginPage() {
@@ -8,11 +8,24 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [apiHint, setApiHint] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [checkingApi, setCheckingApi] = useState(false);
 
   if (!loading && user) {
     return <Navigate to="/orders" replace />;
   }
+
+  const onCheckApi = async () => {
+    setCheckingApi(true);
+    setApiHint(null);
+    try {
+      const result = await checkApiHealth();
+      setApiHint(result.message);
+    } finally {
+      setCheckingApi(false);
+    }
+  };
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -21,15 +34,19 @@ export function LoginPage() {
       return;
     }
     setError(null);
+    setApiHint(null);
     setSubmitting(true);
     try {
       await signIn(email.trim(), password);
     } catch (err) {
+      logApiError('login', err);
       setError(apiErrorMessage(err, 'Не удалось войти'));
     } finally {
       setSubmitting(false);
     }
   };
+
+  const healthUrl = `${getApiHost()}/api/health`;
 
   return (
     <div className="center-page">
@@ -62,10 +79,27 @@ export function LoginPage() {
         </label>
 
         {error ? <p className="error">{error}</p> : null}
+        {apiHint ? (
+          <p className={apiHint.includes('доступен') ? 'hint' : 'error'}>{apiHint}</p>
+        ) : null}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Вход…' : 'Войти'}
         </button>
+
+        <div className="login-api-tools">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onCheckApi}
+            disabled={checkingApi || submitting}
+          >
+            {checkingApi ? 'Проверка…' : 'Проверить API'}
+          </button>
+          <a className="small muted" href={healthUrl} target="_blank" rel="noreferrer">
+            Открыть /api/health
+          </a>
+        </div>
       </form>
     </div>
   );

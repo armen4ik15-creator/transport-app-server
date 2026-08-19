@@ -13,10 +13,14 @@
     "deploy:configure": "node scripts/timeweb-deploy.js configure"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.9.1",
     "axios": "^1.7.9",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.1.1"
+    "react-hook-form": "^7.85.0",
+    "react-router-dom": "^7.1.1",
+    "sonner": "^2.0.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",

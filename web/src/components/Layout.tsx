@@ -30,9 +30,26 @@ export function Layout() {
             Рейсы
           </NavLink>
           {isAdmin ? (
-            <NavLink to="/order-templates" className={({ isActive }) => (isActive ? 'active' : '')}>
-              Шаблоны
-            </NavLink>
+            <>
+              <NavLink to="/drivers" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Водители
+              </NavLink>
+              <NavLink to="/expenses" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Расходы
+              </NavLink>
+              <NavLink to="/cash" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Касса
+              </NavLink>
+              <NavLink to="/finances" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Сводка
+              </NavLink>
+              <NavLink to="/salary" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Зарплата
+              </NavLink>
+              <NavLink to="/order-templates" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Шаблоны
+              </NavLink>
+            </>
           ) : null}
           <button type="button" className="btn-secondary" onClick={signOut}>
             Выйти
