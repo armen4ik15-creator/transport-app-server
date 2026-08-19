@@ -108,7 +108,8 @@ function attachPoolHandlers(pool) {
 }
 
 function createPoolConfig(connectionString, hostOverride) {
-  const sessionOptions = '-c idle_session_timeout=0 -c idle_in_transaction_session_timeout=0';
+  const stmtTimeout = Number(process.env.DB_QUERY_TIMEOUT_MS || 10000);
+  const sessionOptions = `-c idle_session_timeout=0 -c idle_in_transaction_session_timeout=0 -c statement_timeout=${stmtTimeout}`;
   const host = hostOverride || process.env.DB_HOST || '';
   const usePrivateHost = /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
 
