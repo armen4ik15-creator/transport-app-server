@@ -1,0 +1,28 @@
+{
+  "name": "reestrpro-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "deploy": "node scripts/timeweb-deploy.js deploy",
+    "deploy:status": "node scripts/timeweb-deploy.js status",
+    "deploy:configure": "node scripts/timeweb-deploy.js configure"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.9.2",
+    "vite": "^6.0.7"
+  }
+}
