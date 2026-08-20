@@ -153,7 +153,9 @@ function mapTrips(rows) {
       volume: row.volume == null ? null : asNumber(row.volume),
       driver_rate: rate,
       counted_in_salary: counted,
-      exclude_reason: counted ? null : 'Нет фото ТТН — рейс не входит в начисление ЗП',
+      exclude_reason: counted
+        ? null
+        : 'Нет фото ТТН — рейс не входит в начисление ЗП автоматически (может быть учтён вручную отдельной строкой)',
     };
   });
 }
