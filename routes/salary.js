@@ -9,6 +9,7 @@ const {
   parseIsoDate,
   resolvePaymentPeriod,
 } = require('../utils/salaryCalculations');
+const { buildDriverPayrollStatement } = require('../utils/salaryStatement');
 
 const router = express.Router();
 router.use(authMiddleware, requireRole('admin'));
@@ -150,6 +151,34 @@ router.delete('/payments/:id', (req, res) => {
   if (!exists) return res.status(404).json({ error: 'Выплата не найдена' });
   db.prepare('DELETE FROM driver_payments WHERE id = ?').run(id);
   return res.json({ ok: true });
+});
+
+router.get('/statement', (req, res) => {
+  try {
+    const driverId = Number(req.query.driver_id);
+    const from = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const to = req.query.to ? String(req.query.to).slice(0, 10) : null;
+
+    if (!Number.isFinite(driverId) || driverId <= 0) {
+      return res.status(400).json({ error: 'driver_id обязателен' });
+    }
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from и to обязательны (YYYY-MM-DD)' });
+    }
+    if (!parseIsoDate(from) || !parseIsoDate(to)) {
+      return res.status(400).json({ error: 'Некорректный формат периода' });
+    }
+    if (from > to) {
+      return res.status(400).json({ error: 'Начало периода не может быть позже конца' });
+    }
+
+    const statement = buildDriverPayrollStatement(db, { driverId, from, to });
+    if (!statement) return res.status(404).json({ error: 'Водитель не найден' });
+    return res.json(statement);
+  } catch (error) {
+    console.error('[salary/statement]', error);
+    return res.status(500).json({ error: error.message || 'Ошибка формирования ведомости' });
+  }
 });
 
 router.get('/summary', async (req, res) => {
