@@ -10,10 +10,16 @@ const STARTUP_DELAY_MS = Number(process.env.YANDEX_ARCHIVE_STARTUP_DELAY_MS || 1
 const REPORTS_INTERVAL_MS = Number(
   process.env.YANDEX_ARCHIVE_REPORTS_INTERVAL_MS || 24 * 60 * 60 * 1000
 );
+/** Почасовая выгрузка фото ТТН на Яндекс.Диск (по умолчанию 1 час). */
+const PHOTOS_INTERVAL_MS = Number(
+  process.env.YANDEX_ARCHIVE_PHOTOS_INTERVAL_MS || 60 * 60 * 1000
+);
+const PHOTO_LIMIT = Number(process.env.YANDEX_ARCHIVE_PHOTO_LIMIT || 2000);
 const EARNINGS_CRON = process.env.YANDEX_ARCHIVE_EARNINGS_CRON || '0 3 * * *';
 
 let started = false;
-let running = false;
+let reportsRunning = false;
+let photosRunning = false;
 let earningsCronTask = null;
 
 async function syncDueDriverEarnings(trigger = 'scheduled') {
@@ -30,11 +36,29 @@ async function syncDueDriverEarnings(trigger = 'scheduled') {
   return earnings;
 }
 
+async function syncPhotosTick(trigger = 'photos') {
+  const config = getYandexArchiveConfig();
+  if (!config.enabled || photosRunning) return;
+
+  photosRunning = true;
+  try {
+    console.log(`[yandex-archive] ${trigger}: syncing TTN photos...`);
+    const photos = await syncAllTripPhotosToYandex({ limit: PHOTO_LIMIT });
+    console.log(
+      `[yandex-archive] ${trigger}: photos uploaded=${photos.uploaded} skipped=${photos.skipped || 0} failed=${photos.failed}`
+    );
+  } catch (error) {
+    console.error(`[yandex-archive] ${trigger} photos failed:`, error.message);
+  } finally {
+    photosRunning = false;
+  }
+}
+
 async function tick(trigger = 'scheduled') {
   const config = getYandexArchiveConfig();
-  if (!config.enabled || running) return;
+  if (!config.enabled || reportsRunning) return;
 
-  running = true;
+  reportsRunning = true;
   try {
     console.log(`[yandex-archive] ${trigger}: syncing monthly Excel reports...`);
     const reports = await syncMonthlyReportsToYandex({ months: 2 });
@@ -46,17 +70,14 @@ async function tick(trigger = 'scheduled') {
       await syncDueDriverEarnings(trigger);
     }
 
-    if (trigger === 'startup' || process.env.YANDEX_ARCHIVE_SYNC_PHOTOS_ON_SCHEDULE === '1') {
-      console.log(`[yandex-archive] ${trigger}: syncing TTN photos...`);
-      const photos = await syncAllTripPhotosToYandex({ limit: 1000 });
-      console.log(
-        `[yandex-archive] ${trigger}: photos uploaded=${photos.uploaded} failed=${photos.failed}`
-      );
+    // При старте сразу подтягиваем фото; дальше — отдельный часовой цикл.
+    if (trigger === 'startup') {
+      await syncPhotosTick('startup');
     }
   } catch (error) {
     console.error(`[yandex-archive] ${trigger} failed:`, error.message);
   } finally {
-    running = false;
+    reportsRunning = false;
   }
 }
 
@@ -90,7 +111,7 @@ function startYandexArchiveScheduler() {
   started = true;
 
   console.log(
-    `[yandex-archive] scheduler started (first run in ${Math.round(STARTUP_DELAY_MS / 60000)} min)`
+    `[yandex-archive] scheduler started (first run in ${Math.round(STARTUP_DELAY_MS / 60000)} min; photos every ${Math.round(PHOTOS_INTERVAL_MS / 60000)} min)`
   );
 
   setTimeout(() => {
@@ -101,6 +122,10 @@ function startYandexArchiveScheduler() {
     void tick('interval');
   }, REPORTS_INTERVAL_MS);
 
+  setInterval(() => {
+    void syncPhotosTick('hourly');
+  }, PHOTOS_INTERVAL_MS);
+
   startDriverEarningsCron();
 }
 
@@ -108,4 +133,5 @@ module.exports = {
   startYandexArchiveScheduler,
   runYandexArchiveNow: tick,
   syncDueDriverEarnings,
+  syncPhotosTick,
 };

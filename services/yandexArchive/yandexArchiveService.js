@@ -30,6 +30,8 @@ const {
 } = require('../../utils/salaryShiftPeriods');
 const {
   uploadBufferToYandexDisk,
+  ensureFolder,
+  remotePathExists,
 } = require('../backup/yandexDisk');
 
 function getYandexArchiveConfig() {
@@ -154,7 +156,7 @@ function fetchTripsWithPhotos() {
        JOIN drivers d ON d.id = t.driver_id
        LEFT JOIN users u ON u.id = d.user_id
        WHERE t.photo_path IS NOT NULL AND trim(t.photo_path) <> ''
-       ORDER BY COALESCE(t.completed_at, t.created_at) ASC, t.id ASC`
+       ORDER BY COALESCE(t.completed_at, t.created_at) DESC, t.id DESC`
     )
     .all();
 }
@@ -177,6 +179,25 @@ async function uploadTripPhotoToYandex(tripId, options = {}) {
   const filename = buildPhotoFilename(trip);
   const contentType = options.contentType || guessImageContentType(trip.photo_path);
   const photoPath = String(trip.photo_path).trim();
+  const skipIfExists = options.skipIfExists === true;
+
+  if (skipIfExists && !options.buffer) {
+    const { ensureFolder, remotePathExists } = require('../backup/yandexDisk');
+    const folder = await ensureFolder(config.token, remoteFolder);
+    const remotePath = `${folder.replace(/\/$/, '')}/${filename}`;
+    const exists = await remotePathExists(config.token, remotePath);
+    if (exists) {
+      return {
+        uploaded: false,
+        skipped: true,
+        reason: 'already_exists',
+        path: remotePath,
+        tripId: trip.id,
+        driver: trip.driver_name,
+        dateFolder,
+      };
+    }
+  }
 
   const buffer = options.buffer || (await readUploadBuffer(photoPath));
   if (!buffer?.length) {
@@ -189,6 +210,8 @@ async function uploadTripPhotoToYandex(tripId, options = {}) {
     remoteFolder,
     filename,
     contentType,
+    skipIfExists,
+    overwrite: options.overwrite !== false,
   });
 
   return {
@@ -216,19 +239,24 @@ function queueTripPhotoArchive(tripId, options = {}) {
 async function syncAllTripPhotosToYandex({ limit = 500 } = {}) {
   const config = getYandexArchiveConfig();
   if (!config.enabled) {
-    return { uploaded: 0, failed: 0, skipped: true, reason: 'disabled' };
+    return { uploaded: 0, failed: 0, skipped: 0, disabled: true, reason: 'disabled' };
   }
 
-  // Весь список из БД — до await.
+  // Новые рейсы первыми — почасовой проход успевает закрывать свежие фото.
   const trips = fetchTripsWithPhotos().slice(0, Math.max(1, limit));
   let uploaded = 0;
   let failed = 0;
+  let skipped = 0;
   const errors = [];
 
   for (const trip of trips) {
     try {
-      const result = await uploadTripPhotoToYandex(trip.id, { trip });
+      const result = await uploadTripPhotoToYandex(trip.id, {
+        trip,
+        skipIfExists: true,
+      });
       if (result.uploaded) uploaded += 1;
+      else if (result.skipped || result.reason === 'already_exists') skipped += 1;
       else failed += 1;
     } catch (error) {
       failed += 1;
@@ -240,7 +268,13 @@ async function syncAllTripPhotosToYandex({ limit = 500 } = {}) {
     }
   }
 
-  return { uploaded, failed, total: trips.length, errors: errors.slice(0, 20) };
+  return {
+    uploaded,
+    failed,
+    skipped,
+    total: trips.length,
+    errors: errors.slice(0, 20),
+  };
 }
 
 async function syncMonthlyReportsToYandex({ months = 2 } = {}) {

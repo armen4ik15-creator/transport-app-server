@@ -58,6 +58,20 @@ async function ensureFolder(token, folderPath) {
   return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
 
+async function remotePathExists(token, remotePath) {
+  try {
+    await yandexRequest(
+      token,
+      'GET',
+      `/resources?path=${encodeURIComponent(remotePath)}&fields=path,type,name`
+    );
+    return true;
+  } catch (error) {
+    if (error.status === 404) return false;
+    throw error;
+  }
+}
+
 async function uploadBufferToYandexDisk({
   token,
   buffer,
@@ -65,6 +79,7 @@ async function uploadBufferToYandexDisk({
   filename,
   contentType = 'application/octet-stream',
   overwrite = true,
+  skipIfExists = false,
 }) {
   if (!token) {
     return { uploaded: false, reason: 'yandex_token_not_configured' };
@@ -78,6 +93,13 @@ async function uploadBufferToYandexDisk({
 
   const folder = await ensureFolder(token, remoteFolder);
   const remotePath = `${folder.replace(/\/$/, '')}/${filename}`;
+
+  if (skipIfExists) {
+    const exists = await remotePathExists(token, remotePath);
+    if (exists) {
+      return { uploaded: false, skipped: true, reason: 'already_exists', path: remotePath };
+    }
+  }
 
   const uploadInfo = await yandexRequest(
     token,
@@ -139,4 +161,5 @@ module.exports = {
   uploadBufferToYandexDisk,
   ensureFolder,
   yandexRequest,
+  remotePathExists,
 };
