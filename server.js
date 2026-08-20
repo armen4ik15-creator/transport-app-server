@@ -123,6 +123,7 @@ function mountRoutes() {
   const photosRoutes = require('./routes/photos');
   const exportExcelRoutes = require('./routes/exportExcel');
   const earningsRoutes = require('./routes/earnings');
+  const salaryRoutes = require('./routes/salary');
   const contractorPaymentsRoutes = require('./routes/contractorPayments');
   const companyCashRoutes = require('./routes/companyCash');
   const imprestRoutes = require('./routes/imprest');
@@ -165,6 +166,7 @@ function mountRoutes() {
   app.use('/api/photos', photosRoutes);
   app.use('/api/export', exportExcelRoutes);
   app.use('/api/earnings', earningsRoutes);
+  app.use('/api/salary', salaryRoutes);
   app.use('/api/backups', backupsRoutes);
   app.use('/api/admin/backups', backupsRoutes);
   app.use('/api/admin', adminPurgeRoutes);
