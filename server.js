@@ -68,14 +68,25 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/uploads', async (req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   try {
-    const { streamUploadToResponse } = require('./utils/uploadsStorage');
+    const { readUploadBuffer } = require('./utils/uploadsStorage');
     const webPath = `/uploads${req.path.startsWith('/') ? req.path : `/${req.path}`}`;
-    const streamed = await streamUploadToResponse(webPath, res);
-    if (streamed) return undefined;
+    const buffer = await readUploadBuffer(webPath);
+    if (!buffer?.length) {
+      return res.status(404).json({ error: 'Файл не найден' });
+    }
+
+    const ext = String(webPath).toLowerCase();
+    const contentType =
+      ext.endsWith('.png') ? 'image/png' : ext.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    if (req.method === 'HEAD') return res.end();
+    return res.end(buffer);
   } catch (error) {
     console.warn('[uploads] S3 fallback failed:', error.message);
+    return res.status(404).json({ error: 'Файл не найден' });
   }
-  return res.status(404).json({ error: 'Файл не найден' });
 });
 
 if (!fs.existsSync(APP_DOWNLOADS_DIR)) {
