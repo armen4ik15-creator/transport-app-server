@@ -150,10 +150,17 @@ async function readUploadBuffer(webPath) {
   const key = getUploadsObjectKey(normalized);
   if (!client || !key) return null;
 
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    Number(process.env.S3_GET_TIMEOUT_MS) || 12000
+  );
+
   try {
     const response = await sendS3Command(
       client,
-      new GetObjectCommand({ Bucket: config.bucket, Key: key })
+      new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: controller.signal }
     );
     if (!response.Body) return null;
 
@@ -164,10 +171,26 @@ async function readUploadBuffer(webPath) {
     for await (const chunk of body) {
       chunks.push(chunk);
     }
-    return Buffer.concat(chunks);
+    const buffer = Buffer.concat(chunks);
+
+    // Прогреваем локальный /tmp, чтобы следующие запросы шли через express.static.
+    try {
+      const localPath = path.join(
+        require('../config/paths').UPLOADS_DIR,
+        normalized.replace(/^\/uploads\//, '')
+      );
+      fs.mkdirSync(path.dirname(localPath), { recursive: true });
+      fs.writeFileSync(localPath, buffer);
+    } catch (cacheError) {
+      console.warn('[uploads] local cache write failed:', cacheError.message);
+    }
+
+    return buffer;
   } catch (error) {
     console.warn('[uploads] S3 read buffer failed:', error.message);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

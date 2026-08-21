@@ -36,7 +36,16 @@ function getLocalIpv4Addresses() {
 
 const { responseNoiseMiddleware } = require('./middleware/responseNoise');
 
-app.use(compression());
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (req.path.startsWith('/uploads') || req.originalUrl.startsWith('/uploads')) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  })
+);
 app.use(cors());
 app.use(
   express.json({
