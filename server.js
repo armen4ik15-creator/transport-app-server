@@ -64,6 +64,20 @@ app.use((req, res, next) => {
 
 app.use('/uploads', express.static(UPLOADS_DIR));
 
+/** Timeweb App Platform: /tmp очищается при redeploy — отдаём фото из S3, если локально нет. */
+app.use('/uploads', async (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  try {
+    const { streamUploadToResponse } = require('./utils/uploadsStorage');
+    const webPath = `/uploads${req.path.startsWith('/') ? req.path : `/${req.path}`}`;
+    const streamed = await streamUploadToResponse(webPath, res);
+    if (streamed) return undefined;
+  } catch (error) {
+    console.warn('[uploads] S3 fallback failed:', error.message);
+  }
+  return res.status(404).json({ error: 'Файл не найден' });
+});
+
 if (!fs.existsSync(APP_DOWNLOADS_DIR)) {
   fs.mkdirSync(APP_DOWNLOADS_DIR, { recursive: true });
 }
