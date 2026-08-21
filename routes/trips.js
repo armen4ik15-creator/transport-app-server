@@ -415,6 +415,26 @@ router.get('/summary', (req, res) => {
   });
 });
 
+router.get('/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Некорректный id рейса' });
+  }
+
+  const row = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(id);
+  if (!row) return res.status(404).json({ error: 'Рейс не найден' });
+
+  if (req.user.role !== 'admin') {
+    const ownDriverId = getDriverIdForUser(req.user.id);
+    if (!ownDriverId || Number(row.driver_id) !== Number(ownDriverId)) {
+      return res.status(403).json({ error: 'Нет доступа к этому рейсу' });
+    }
+  }
+
+  const [enriched] = await mapTripsWithPhotoAvailability([row]);
+  return res.json(enriched);
+});
+
 router.post('/', (req, res, next) => {
   const contentType = String(req.headers['content-type'] || '');
   if (contentType.includes('multipart/form-data')) {

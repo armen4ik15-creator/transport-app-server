@@ -93,10 +93,20 @@ router.get('/:id', (req, res) => {
   const trips = db
     .prepare(
       `SELECT
-         t.id, t.order_id, t.driver_id, t.stage, t.status, t.ttn_number, t.volume, t.note, t.photo_path, t.created_by, t.created_at,
-         u.email AS created_by_email
+         t.id, t.order_id, t.driver_id, t.stage, t.status, t.ttn_number, t.volume, t.note,
+         t.photo_path, t.created_by, t.created_at, t.completed_at,
+         u.email AS created_by_email,
+         d.car_number AS driver_car_number,
+         du.full_name AS driver_name,
+         o.task_name, o.material, o.load_address, o.unload_address, o.driver_rate, o.company_rate,
+         o.distance_km, o.unit, o.quantity,
+         c.name AS contractor_name
        FROM trips t
        JOIN users u ON u.id = t.created_by
+       JOIN drivers d ON d.id = t.driver_id
+       LEFT JOIN users du ON du.id = d.user_id
+       LEFT JOIN orders o ON o.id = t.order_id
+       LEFT JOIN contractors c ON c.id = o.contractor_id
        WHERE t.order_id = ?
        ORDER BY t.created_at DESC`
     )
