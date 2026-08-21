@@ -10,6 +10,7 @@ const {
   resolvePaymentPeriod,
 } = require('../utils/salaryCalculations');
 const { buildDriverPayrollStatement } = require('../utils/salaryStatement');
+const { findDuplicateImportMarker } = require('../utils/importMarkers');
 
 const router = express.Router();
 router.use(authMiddleware, requireRole('admin'));
@@ -120,6 +121,18 @@ router.post('/payments', (req, res) => {
 
   const paymentMethod = validateMethod(method, type);
   if (paymentMethod.error) return res.status(400).json({ error: paymentMethod.error });
+
+  const duplicate = findDuplicateImportMarker(db, 'driver_payments', note, {
+    amount: numericAmount,
+    driverId: Number(driver_id),
+  });
+  if (duplicate) {
+    return res.status(409).json({
+      error: `Дубликат импорта: маркер ${duplicate.marker} уже в выплате #${duplicate.id}`,
+      existing_id: duplicate.id,
+      marker: duplicate.marker,
+    });
+  }
 
   const result = db
     .prepare(

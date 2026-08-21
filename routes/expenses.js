@@ -6,6 +6,7 @@ const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadsSubdir } = require('../config/paths');
 const { queueUploadMirror } = require('../utils/uploadPersistence');
+const { findDuplicateImportMarker } = require('../utils/importMarkers');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -203,6 +204,21 @@ router.post('/', upload.single('photo'), (req, res) => {
   // Водитель и off_settlement — никогда не списывают р/с напрямую.
   const safeMethod = isDriver || offSettlementFlag ? null : method || null;
   const timestamp = nowIso();
+  const safeComment = (comment && String(comment).trim()) || null;
+
+  if (!isDriver && safeComment) {
+    const duplicate = findDuplicateImportMarker(db, 'expenses', safeComment, {
+      amount: numericAmount,
+    });
+    if (duplicate) {
+      cleanupUploadedFile(req.file);
+      return res.status(409).json({
+        error: `Дубликат импорта: маркер ${duplicate.marker} уже в расходе #${duplicate.id}`,
+        existing_id: duplicate.id,
+        marker: duplicate.marker,
+      });
+    }
+  }
 
   const result = db
     .prepare(
@@ -216,7 +232,7 @@ router.post('/', upload.single('photo'), (req, res) => {
       safeExpType,
       safeMethod,
       numericAmount,
-      (comment && String(comment).trim()) || null,
+      safeComment,
       safeDriverId,
       safeCarNumber,
       req.user.id,

@@ -27,6 +27,8 @@ router.get('/payments', (req, res) => {
   return res.json(rows);
 });
 
+const { findDuplicateImportMarker } = require('../utils/importMarkers');
+
 router.post('/payments', (req, res) => {
   const { contractor_id, amount, note, payment_date } = req.body || {};
   if (!contractor_id || amount == null) {
@@ -39,6 +41,17 @@ router.post('/payments', (req, res) => {
   const numericAmount = Number(amount);
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
     return res.status(400).json({ error: 'amount должен быть положительным числом' });
+  }
+
+  const duplicate = findDuplicateImportMarker(db, 'contractor_payments', note, {
+    amount: numericAmount,
+  });
+  if (duplicate) {
+    return res.status(409).json({
+      error: `Дубликат импорта: маркер ${duplicate.marker} уже в оплате #${duplicate.id}`,
+      existing_id: duplicate.id,
+      marker: duplicate.marker,
+    });
   }
 
   const safePaymentDate =
