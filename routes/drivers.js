@@ -170,17 +170,6 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     }
   }
 
-  let nextArchivedAt = null;
-  if (is_archived !== undefined) {
-    nextArchived = Number(Boolean(is_archived));
-    if (nextArchived) {
-      const current = db.prepare('SELECT archived_at FROM drivers WHERE id = ?').get(id);
-      nextArchivedAt = current?.archived_at || new Date().toISOString();
-    } else {
-      nextArchivedAt = null;
-    }
-  }
-
   db.prepare('UPDATE users SET full_name = COALESCE(?, full_name), phone = ? WHERE id = ?').run(
     full_name ?? null,
     phone ?? null,
@@ -195,8 +184,7 @@ router.put('/:id', requireRole('admin'), (req, res) => {
          is_active = COALESCE(?, is_active),
          senior_shift_bonus = COALESCE(?, senior_shift_bonus),
          is_archived = COALESCE(?, is_archived),
-         salary_opening_accrued = COALESCE(?, salary_opening_accrued),
-         archived_at = CASE WHEN ? IS NOT NULL THEN ? ELSE archived_at END
+         salary_opening_accrued = COALESCE(?, salary_opening_accrued)
      WHERE id = ?`
   ).run(
     car_number ?? null,
@@ -207,10 +195,12 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     nextSenior,
     nextArchived,
     nextOpeningAccrued,
-    is_archived !== undefined ? 1 : null,
-    nextArchivedAt,
     id
   );
+
+  if (is_archived !== undefined) {
+    db.prepare('UPDATE drivers SET archived_at = ? WHERE id = ?').run(nextArchivedAt, id);
+  }
   const updated = db.prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`).get(id);
   return res.json(updated);
 });
