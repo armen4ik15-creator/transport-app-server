@@ -150,8 +150,12 @@ router.put('/:id', requireRole('admin'), (req, res) => {
   }
 
   let nextArchived = null;
+  let nextArchivedAt = null;
   if (is_archived !== undefined) {
     nextArchived = Number(Boolean(is_archived));
+    if (nextArchived) {
+      nextArchivedAt = new Date().toISOString();
+    }
   }
 
   let nextOpeningAccrued = null;
@@ -163,6 +167,17 @@ router.put('/:id', requireRole('admin'), (req, res) => {
       if (!Number.isFinite(nextOpeningAccrued) || nextOpeningAccrued < 0) {
         return res.status(400).json({ error: 'salary_opening_accrued должен быть числом ≥ 0' });
       }
+    }
+  }
+
+  let nextArchivedAt = null;
+  if (is_archived !== undefined) {
+    nextArchived = Number(Boolean(is_archived));
+    if (nextArchived) {
+      const current = db.prepare('SELECT archived_at FROM drivers WHERE id = ?').get(id);
+      nextArchivedAt = current?.archived_at || new Date().toISOString();
+    } else {
+      nextArchivedAt = null;
     }
   }
 
@@ -181,11 +196,7 @@ router.put('/:id', requireRole('admin'), (req, res) => {
          senior_shift_bonus = COALESCE(?, senior_shift_bonus),
          is_archived = COALESCE(?, is_archived),
          salary_opening_accrued = COALESCE(?, salary_opening_accrued),
-         archived_at = CASE
-           WHEN ? IS NOT NULL AND ? = 1 THEN COALESCE(archived_at, datetime('now'))
-           WHEN ? IS NOT NULL AND ? = 0 THEN NULL
-           ELSE archived_at
-         END
+         archived_at = CASE WHEN ? IS NOT NULL THEN ? ELSE archived_at END
      WHERE id = ?`
   ).run(
     car_number ?? null,
@@ -196,10 +207,8 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     nextSenior,
     nextArchived,
     nextOpeningAccrued,
-    nextArchived,
-    nextArchived,
-    nextArchived,
-    nextArchived,
+    is_archived !== undefined ? 1 : null,
+    nextArchivedAt,
     id
   );
   const updated = db.prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`).get(id);
