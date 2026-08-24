@@ -1,4 +1,4 @@
-import type { Driver, DriverListStats } from '../types';
+import type { Driver } from '../types';
 
 export type DriverStatusFilter = 'all' | 'active' | 'inactive';
 export type DriverArchiveFilter = 'hide' | 'only' | 'all';
@@ -39,21 +39,4 @@ export function filterDrivers(
 export function driverStatusLabel(isActive: number, isArchived?: number): string {
   if (isArchived) return 'Архив';
   return isActive ? 'Активен' : 'Неактивен';
-}
-
-export function mergeDriverStats(
-  driverId: number,
-  statsMap: Record<number, DriverListStats>
-): DriverListStats {
-  return (
-    statsMap[driverId] ?? {
-      totalTrips: 0,
-      gross: 0,
-      paid: 0,
-      owed: 0,
-      overpaid: 0,
-      firstTripDate: null,
-      lastPaymentDate: null,
-    }
-  );
 }

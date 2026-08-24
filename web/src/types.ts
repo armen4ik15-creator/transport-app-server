@@ -59,16 +59,6 @@ export interface EarningsSummary {
   trips?: EarningsTripItem[];
 }
 
-export interface DriverListStats {
-  totalTrips: number;
-  gross: number;
-  paid: number;
-  owed: number;
-  overpaid: number;
-  firstTripDate: string | null;
-  lastPaymentDate: string | null;
-}
-
 export interface Contractor {
   id: number;
   name: string;
@@ -415,6 +405,12 @@ export interface DriverDebtSummary {
   last_trip_date?: string | null;
   first_payment_date?: string | null;
   last_payment_date?: string | null;
+  period_from?: string;
+  period_to?: string;
+  period_gross?: number;
+  period_gross_trips?: number;
+  period_senior_allowance?: number;
+  period_compensations?: number;
 }
 
 export interface DriverAccruedPreview {
@@ -488,6 +484,10 @@ export interface DriverSalaryStatement {
   from: string;
   to: string;
   period_label: string;
+  pay_due_date?: string | null;
+  pay_due_label?: string | null;
+  pay_schedule_rule?: string | null;
+  pay_schedule_shift?: 1 | 2 | null;
   totals: SalaryStatementTotals;
   ledger: SalaryLedgerLine[];
   trips: SalaryStatementTrip[];

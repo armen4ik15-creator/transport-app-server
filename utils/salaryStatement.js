@@ -8,6 +8,7 @@ const {
   isTripSalaryEligible,
   resolvePaymentPeriod,
 } = require('./salaryCalculations');
+const { getPayScheduleForPeriod } = require('./salaryPaySchedule');
 
 const COMPLETED_TRIP_SQL =
   "(t.status = 'completed' OR (t.status IS NULL AND t.stage = 'unloading'))";
@@ -35,6 +36,7 @@ const EXPENSE_CATEGORY = {
   supplies: 'Расходники',
   lease: 'Аренда',
   bank_fee: 'Банк',
+  salary_accountant: 'ЗП бухгалтер',
   salary_other: 'Зарплата / прочее',
   other: 'Прочее',
   idle: 'Простой',
@@ -306,6 +308,7 @@ function buildDriverPayrollStatement(db, { driverId, from, to }) {
 
   const accruedTotal = tripsAccrued + seniorAllowance + compensationsTotal;
   const debt = accruedTotal - deducted - paidTotal;
+  const paySchedule = getPayScheduleForPeriod(from, to);
 
   return {
     driver_id: driver.driver_id,
@@ -314,6 +317,10 @@ function buildDriverPayrollStatement(db, { driverId, from, to }) {
     from,
     to,
     period_label: `${formatRuDate(from)} — ${formatRuDate(to)}`,
+    pay_due_date: paySchedule?.pay_due_date ?? null,
+    pay_due_label: paySchedule?.pay_due_label ?? null,
+    pay_schedule_rule: paySchedule?.pay_schedule_rule ?? null,
+    pay_schedule_shift: paySchedule?.shift ?? null,
     totals: {
       accrued: accruedTotal,
       paid: paidTotal,

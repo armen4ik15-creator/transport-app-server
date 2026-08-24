@@ -6,8 +6,23 @@ import { apiErrorMessage } from '../api/client';
 import { DataTable } from '../components/DataTable';
 import { SalarySubNav } from '../components/SalarySubNav';
 import { accrualStatusLabel } from '../constants/salary';
+import { formatDriverOwed } from '../utils/driverSalaryDisplay';
 import { formatMoney, paginateItems, totalPages } from '../utils/pagination';
 import type { DriverDebtSummary } from '../types';
+
+function debtBreakdownLabel(row: DriverDebtSummary): string {
+  const parts: string[] = [`рейсы ${formatMoney(row.gross_trips)}`];
+  if ((row.senior_allowance ?? 0) > 0) {
+    parts.push(`старший ${formatMoney(row.senior_allowance)}`);
+  }
+  if ((row.compensations ?? 0) > 0) {
+    parts.push(`комп. ${formatMoney(row.compensations)}`);
+  }
+  if ((row.opening_accrued ?? 0) > 0) {
+    parts.push(`закрытие ${formatMoney(row.opening_accrued ?? 0)}`);
+  }
+  return parts.join(' · ');
+}
 
 export function SalaryDebtsPage() {
   const [rows, setRows] = useState<DriverDebtSummary[]>([]);
@@ -45,7 +60,7 @@ export function SalaryDebtsPage() {
     return {
       gross: rows.reduce((sum, row) => sum + row.gross, 0),
       paid: rows.reduce((sum, row) => sum + row.paid, 0),
-      debt: withDebt.reduce((sum, row) => sum + (row.owed ?? Math.max(0, row.debt)), 0),
+      owed: withDebt.reduce((sum, row) => sum + (row.owed ?? Math.max(0, row.debt)), 0),
       driversWithDebt: withDebt.length,
     };
   }, [rows]);
@@ -83,7 +98,14 @@ export function SalaryDebtsPage() {
       <div className="page-header">
         <div>
           <h2>Долги ({filteredRows.length})</h2>
-          <p className="muted">Задолженность по всем неархивным водителям. Период: всё время (рейсы с фото + выплаты).</p>
+          <p className="muted">
+            Общий баланс по неархивным водителям за всё время: рейсы с фото ТТН + надбавки +
+            компенсации + ручные закрытия − выплаты. Детали по вахтам — в{' '}
+            <Link to="/salary" className="table-link">
+              Начислениях
+            </Link>
+            .
+          </p>
         </div>
         <button type="button" className="btn-secondary" onClick={onRefresh} disabled={refreshing}>
           {refreshing ? 'Обновление…' : 'Обновить'}
@@ -100,8 +122,8 @@ export function SalaryDebtsPage() {
           <strong>{formatMoney(totals.paid)}</strong>
         </article>
         <article className="card stat-card">
-          <p className="muted small">Общий долг</p>
-          <strong>{formatMoney(totals.debt)}</strong>
+          <p className="muted small">К выплате</p>
+          <strong>{formatMoney(totals.owed)}</strong>
         </article>
         <article className="card stat-card">
           <p className="muted small">Водителей с долгом</p>
@@ -137,13 +159,16 @@ export function SalaryDebtsPage() {
                 key: 'driver',
                 header: 'Водитель',
                 render: (row) => (
-                  <Link
-                    to={`/salary/drivers/${row.driver_id}`}
-                    className="table-link"
-                  >
+                  <Link to={`/salary/drivers/${row.driver_id}`} className="table-link">
                     {row.driver_name ?? `#${row.driver_id}`}
+                    {row.driver_car_number ? ` · ${row.driver_car_number}` : ''}
                   </Link>
                 ),
+              },
+              {
+                key: 'breakdown',
+                header: 'Из чего начислено',
+                render: (row) => <span className="muted small">{debtBreakdownLabel(row)}</span>,
               },
               {
                 key: 'gross',
@@ -158,7 +183,7 @@ export function SalaryDebtsPage() {
               {
                 key: 'debt',
                 header: 'К выплате',
-                render: (row) => formatMoney(row.owed ?? Math.max(0, row.debt)),
+                render: (row) => formatDriverOwed(row.owed ?? Math.max(0, row.debt)),
               },
               {
                 key: 'status',
@@ -169,9 +194,25 @@ export function SalaryDebtsPage() {
           />
           {pageCount > 1 ? (
             <div className="pagination-row">
-              <button type="button" className="btn-secondary" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Назад</button>
-              <span className="muted small">Страница {safePage} из {pageCount}</span>
-              <button type="button" className="btn-secondary" disabled={safePage >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>Вперёд →</button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                ← Назад
+              </button>
+              <span className="muted small">
+                Страница {safePage} из {pageCount}
+              </span>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              >
+                Вперёд →
+              </button>
             </div>
           ) : null}
         </>

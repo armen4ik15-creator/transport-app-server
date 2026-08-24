@@ -226,6 +226,13 @@ router.get('/summary', async (req, res) => {
 router.get('/debts', async (req, res) => {
   try {
     const includeArchived = req.query.include_archived === '1';
+    const periodFrom = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const periodTo = req.query.to ? String(req.query.to).slice(0, 10) : null;
+    const hasPeriod =
+      Boolean(periodFrom && periodTo) &&
+      Boolean(parseIsoDate(periodFrom)) &&
+      Boolean(parseIsoDate(periodTo)) &&
+      periodFrom <= periodTo;
 
     const drivers = db
       .prepare(
@@ -247,7 +254,7 @@ router.get('/debts', async (req, res) => {
 
       const balance = buildDriverSalaryBalance(db, driver.driver_id, '1970-01-01', '2099-12-31');
 
-      rows.push({
+      const row = {
         driver_id: driver.driver_id,
         driver_name: driver.driver_name,
         driver_car_number: driver.driver_car_number,
@@ -255,7 +262,21 @@ router.get('/debts', async (req, res) => {
         is_active: Number(driver.is_active) === 1,
         calculation_scope: 'all_time',
         ...balance,
-      });
+      };
+
+      if (hasPeriod) {
+        const periodBalance = buildDriverSalaryBalance(db, driver.driver_id, periodFrom, periodTo, {
+          includeOpening: false,
+        });
+        row.period_from = periodFrom;
+        row.period_to = periodTo;
+        row.period_gross = periodBalance.gross;
+        row.period_gross_trips = periodBalance.gross_trips;
+        row.period_senior_allowance = periodBalance.senior_allowance;
+        row.period_compensations = periodBalance.compensations;
+      }
+
+      rows.push(row);
     }
 
     rows.sort((a, b) => b.owed - a.owed || b.debt - a.debt || String(a.driver_name).localeCompare(String(b.driver_name)));

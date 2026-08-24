@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { listDrivers } from '../api/drivers';
 import { createSalaryPayment, getSalarySummary } from '../api/salary';
 import { apiErrorMessage } from '../api/client';
 import { DataTable } from '../components/DataTable';
 import { SalaryPaymentModal } from '../components/SalaryPaymentForm';
+import { SalaryPeriodFilter, type SalaryPeriodDraft } from '../components/SalaryPeriodFilter';
 import { SalarySubNav } from '../components/SalarySubNav';
 import { accrualStatusLabel } from '../constants/salary';
-import { getReportPeriodBounds } from '../utils/datePeriods';
+import {
+  defaultSalaryPeriod,
+  getSalaryShiftBounds,
+  inferShiftFromRange,
+  parseMonthKey,
+} from '../utils/salaryPeriods';
 import { formatMoney, paginateItems, totalPages } from '../utils/pagination';
 import type { Driver, DriverSalarySummary } from '../types';
 
@@ -17,55 +23,102 @@ interface AccrualRow extends DriverSalarySummary {
   driver_car_number: string | null;
 }
 
+function buildDraftFromParams(
+  searchParams: URLSearchParams,
+  fallback: ReturnType<typeof defaultSalaryPeriod>
+): SalaryPeriodDraft {
+  const from = searchParams.get('from') || fallback.from;
+  const to = searchParams.get('to') || fallback.to;
+  const inferred = inferShiftFromRange(from, to);
+  const monthValue =
+    searchParams.get('month') ||
+    inferred?.monthValue ||
+    `${fallback.year}-${String(fallback.month).padStart(2, '0')}`;
+  const shiftParam = searchParams.get('shift');
+  const shift =
+    shiftParam === '1' || shiftParam === '2'
+      ? (Number(shiftParam) as 1 | 2)
+      : shiftParam === 'month'
+        ? 'month'
+        : inferred?.shift ?? fallback.shift;
+
+  const bounds = (() => {
+    const parsed = parseMonthKey(monthValue);
+    if (!parsed) return { from, to };
+    return getSalaryShiftBounds(parsed.year, parsed.month, shift) ?? { from, to };
+  })();
+
+  return {
+    monthValue,
+    shift,
+    from: searchParams.get('from') ? from : bounds.from,
+    to: searchParams.get('to') ? to : bounds.to,
+    driverFilter: searchParams.get('driver') || 'all',
+    statusFilter: searchParams.get('status') || 'all',
+  };
+}
+
 export function SalaryAccrualsPage() {
-  const defaultPeriod = getReportPeriodBounds('month');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fallback = defaultSalaryPeriod();
+  const initial = buildDraftFromParams(searchParams, fallback);
+
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [rows, setRows] = useState<AccrualRow[]>([]);
-  const [from, setFrom] = useState(defaultPeriod.from);
-  const [to, setTo] = useState(defaultPeriod.to);
-  const [driverFilter, setDriverFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [draft, setDraft] = useState<SalaryPeriodDraft>(initial);
+  const [applied, setApplied] = useState<SalaryPeriodDraft>(initial);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    const driverList = drivers.length > 0 ? drivers : await listDrivers();
-    if (drivers.length === 0) setDrivers(driverList);
+  const load = useCallback(
+    async (period: SalaryPeriodDraft) => {
+      setError(null);
+      const driverList = drivers.length > 0 ? drivers : await listDrivers();
+      if (drivers.length === 0) setDrivers(driverList);
 
-    const activeDrivers = driverList.filter((driver) => driver.is_active);
-    const summaries = await Promise.all(
-      activeDrivers.map(async (driver) => {
-        const summary = await getSalarySummary(driver.id, { from, to });
-        return {
-          ...summary,
-          driver_name: driver.full_name,
-          driver_car_number: driver.car_number,
-        } satisfies AccrualRow;
-      })
-    );
+      const visibleDrivers = driverList.filter((driver) => !driver.is_archived);
+      const summaries = await Promise.all(
+        visibleDrivers.map(async (driver) => {
+          const summary = await getSalarySummary(driver.id, {
+            from: period.from,
+            to: period.to,
+          });
+          return {
+            ...summary,
+            driver_name: driver.full_name,
+            driver_car_number: driver.car_number,
+          } satisfies AccrualRow;
+        })
+      );
 
-    setRows(summaries);
-  }, [drivers, from, to]);
+      setRows(summaries);
+    },
+    [drivers]
+  );
 
   useEffect(() => {
-    load()
+    load(applied)
       .catch((err) => setError(apiErrorMessage(err, 'Не удалось загрузить начисления')))
       .finally(() => setLoading(false));
-  }, [load]);
+    // только первый mount / смена applied через apply
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
-      if (driverFilter !== 'all' && row.driver_id !== Number(driverFilter)) return false;
-      if (statusFilter === 'debt' && row.debt <= 0.01) return false;
-      if (statusFilter === 'closed' && row.debt > 0.01) return false;
+      if (applied.driverFilter !== 'all' && row.driver_id !== Number(applied.driverFilter)) {
+        return false;
+      }
+      if (applied.statusFilter === 'debt' && row.debt <= 0.01) return false;
+      if (applied.statusFilter === 'closed' && row.debt > 0.01) return false;
       return row.gross > 0 || row.paid > 0 || row.debt !== 0;
     });
-  }, [driverFilter, rows, statusFilter]);
+  }, [applied.driverFilter, applied.statusFilter, rows]);
 
   const pageCount = totalPages(filteredRows.length);
   const safePage = Math.min(page, pageCount);
@@ -83,10 +136,41 @@ export function SalaryAccrualsPage() {
     );
   }, [filteredRows]);
 
+  const syncUrl = (period: SalaryPeriodDraft) => {
+    const params: Record<string, string> = {
+      from: period.from,
+      to: period.to,
+      month: period.monthValue,
+      shift: String(period.shift),
+    };
+    if (period.driverFilter !== 'all') params.driver = period.driverFilter;
+    if (period.statusFilter !== 'all') params.status = period.statusFilter;
+    setSearchParams(params);
+  };
+
+  const onApply = async () => {
+    if (!draft.from || !draft.to || draft.from > draft.to) {
+      toast.error('Проверьте период: дата «С» не позже «По»');
+      return;
+    }
+    setApplying(true);
+    setPage(1);
+    try {
+      await load(draft);
+      setApplied(draft);
+      syncUrl(draft);
+      toast.success('Фильтр применён');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Не удалось применить фильтр'));
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await load();
+      await load(applied);
       toast.success('Данные обновлены');
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Не удалось обновить'));
@@ -99,7 +183,7 @@ export function SalaryAccrualsPage() {
     setSaving(true);
     try {
       await createSalaryPayment(payload);
-      await load();
+      await load(applied);
       setPaymentOpen(false);
       toast.success('Выплата сохранена');
     } catch (err) {
@@ -109,7 +193,8 @@ export function SalaryAccrualsPage() {
     }
   };
 
-  const selectedDriverId = driverFilter !== 'all' ? Number(driverFilter) : undefined;
+  const selectedDriverId =
+    applied.driverFilter !== 'all' ? Number(applied.driverFilter) : undefined;
 
   if (loading) return <p className="muted">Загрузка начислений…</p>;
 
@@ -118,7 +203,7 @@ export function SalaryAccrualsPage() {
       <section className="wide-section">
         <SalarySubNav />
         <p className="error">{error}</p>
-        <button type="button" className="btn-primary" onClick={() => load()}>
+        <button type="button" className="btn-primary" onClick={() => load(applied)}>
           Повторить
         </button>
       </section>
@@ -133,7 +218,12 @@ export function SalaryAccrualsPage() {
         <div>
           <h2>Начисления ({filteredRows.length})</h2>
           <p className="muted">
-            Расчёт по завершённым рейсам, компенсациям и надбавкам за выбранный период.
+            Начисления за выбранную вахту или месяц. Клик по водителю — ведомость. Общий баланс за
+            всё время — в{' '}
+            <Link to="/salary/debts" className="table-link">
+              Долгах
+            </Link>
+            .
           </p>
         </div>
         <div className="action-row">
@@ -165,35 +255,14 @@ export function SalaryAccrualsPage() {
         </article>
       </div>
 
-      <div className="toolbar card">
-        <label className="field grow-field">
-          <span>С</span>
-          <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
-        </label>
-        <label className="field grow-field">
-          <span>По</span>
-          <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
-        </label>
-        <label className="field grow-field">
-          <span>Водитель</span>
-          <select value={driverFilter} onChange={(e) => { setDriverFilter(e.target.value); setPage(1); }}>
-            <option value="all">Все</option>
-            {drivers.map((driver) => (
-              <option key={driver.id} value={driver.id}>
-                {driver.full_name ?? driver.email}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field grow-field">
-          <span>Статус</span>
-          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
-            <option value="all">Все</option>
-            <option value="debt">С долгом</option>
-            <option value="closed">Закрыто</option>
-          </select>
-        </label>
-      </div>
+      <SalaryPeriodFilter
+        draft={draft}
+        onChange={setDraft}
+        onApply={onApply}
+        applying={applying}
+        drivers={drivers}
+        appliedLabel={`Показано: ${applied.from} — ${applied.to}`}
+      />
 
       {error ? <p className="error">{error}</p> : null}
 
@@ -209,7 +278,10 @@ export function SalaryAccrualsPage() {
                 key: 'driver',
                 header: 'Водитель',
                 render: (row) => (
-                  <Link to={`/drivers/${row.driver_id}`} className="table-link">
+                  <Link
+                    to={`/salary/drivers/${row.driver_id}?from=${applied.from}&to=${applied.to}`}
+                    className="table-link"
+                  >
                     {row.driver_name ?? `#${row.driver_id}`}
                   </Link>
                 ),
@@ -217,7 +289,7 @@ export function SalaryAccrualsPage() {
               {
                 key: 'period',
                 header: 'Период',
-                render: () => `${from} — ${to}`,
+                render: () => `${applied.from} — ${applied.to}`,
               },
               {
                 key: 'gross',
@@ -231,16 +303,22 @@ export function SalaryAccrualsPage() {
               },
               {
                 key: 'debt',
-                header: 'Долг',
-                render: (row) => formatMoney(row.debt),
+                header: 'Остаток',
+                render: (row) => formatMoney(Math.max(0, row.debt)),
               },
               {
                 key: 'type',
-                header: 'Тип',
+                header: 'Из чего',
                 render: (row) => (
                   <span className="muted small">
                     рейсы {formatMoney(row.gross_trips)}
+                    {row.senior_allowance > 0
+                      ? ` · старший ${formatMoney(row.senior_allowance)}`
+                      : ''}
                     {row.compensations > 0 ? ` · комп. ${formatMoney(row.compensations)}` : ''}
+                    {(row.opening_accrued ?? 0) > 0
+                      ? ` · закрытие ${formatMoney(row.opening_accrued ?? 0)}`
+                      : ''}
                   </span>
                 ),
               },
@@ -253,9 +331,25 @@ export function SalaryAccrualsPage() {
           />
           {pageCount > 1 ? (
             <div className="pagination-row">
-              <button type="button" className="btn-secondary" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Назад</button>
-              <span className="muted small">Страница {safePage} из {pageCount}</span>
-              <button type="button" className="btn-secondary" disabled={safePage >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>Вперёд →</button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                ← Назад
+              </button>
+              <span className="muted small">
+                Страница {safePage} из {pageCount}
+              </span>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              >
+                Вперёд →
+              </button>
             </div>
           ) : null}
         </>
@@ -265,7 +359,7 @@ export function SalaryAccrualsPage() {
         open={paymentOpen}
         drivers={drivers}
         initialDriverId={selectedDriverId}
-        initialPeriod={{ from, to }}
+        initialPeriod={{ from: applied.from, to: applied.to }}
         submitting={saving}
         onSubmit={onCreatePayment}
         onClose={() => setPaymentOpen(false)}

@@ -5,6 +5,7 @@ import type {
   DriverPaymentRecord,
   DriverPaymentMethod,
   DriverPaymentType,
+  DriverSalaryStatement,
   DriverSalarySummary,
 } from '../types';
 
@@ -44,8 +45,11 @@ export async function getSalarySummary(
   return data;
 }
 
-export async function getSalaryDebts(): Promise<DriverDebtSummary[]> {
-  const { data } = await api.get<DriverDebtSummary[]>('/salary/debts');
+export async function getSalaryDebts(params?: {
+  from?: string;
+  to?: string;
+}): Promise<DriverDebtSummary[]> {
+  const { data } = await api.get<DriverDebtSummary[]>('/salary/debts', { params });
   return data;
 }
 
@@ -55,6 +59,17 @@ export async function getSalaryAccrued(
   to: string
 ): Promise<DriverAccruedPreview> {
   const { data } = await api.get<DriverAccruedPreview>('/salary/accrued', {
+    params: { driver_id: driverId, from, to },
+  });
+  return data;
+}
+
+export async function getSalaryStatement(
+  driverId: number,
+  from: string,
+  to: string
+): Promise<DriverSalaryStatement> {
+  const { data } = await api.get<DriverSalaryStatement>('/salary/statement', {
     params: { driver_id: driverId, from, to },
   });
   return data;
