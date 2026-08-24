@@ -11,6 +11,9 @@ const DRIVER_WITH_USER = `
   SELECT
     d.id, d.user_id, d.license_number, d.license_expiry, d.medical_check_expiry,
     d.is_active, d.car_number, COALESCE(d.senior_shift_bonus, 0) AS senior_shift_bonus,
+    COALESCE(d.is_archived, 0) AS is_archived,
+    COALESCE(d.salary_opening_accrued, 0) AS salary_opening_accrued,
+    d.archived_at,
     d.created_at,
     u.email, u.full_name, u.phone
   FROM drivers d
@@ -40,6 +43,8 @@ router.post('/', requireRole('admin'), (req, res) => {
     medical_check_expiry,
     is_active,
     senior_shift_bonus,
+    is_archived,
+    salary_opening_accrued,
   } = req.body || {};
   if (!email || !password || !full_name) {
     return res
@@ -105,6 +110,8 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     medical_check_expiry,
     is_active,
     senior_shift_bonus,
+    is_archived,
+    salary_opening_accrued,
     password,
   } = req.body || {};
   const driver = db.prepare('SELECT id, user_id FROM drivers WHERE id = ?').get(id);
@@ -142,6 +149,23 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     }
   }
 
+  let nextArchived = null;
+  if (is_archived !== undefined) {
+    nextArchived = Number(Boolean(is_archived));
+  }
+
+  let nextOpeningAccrued = null;
+  if (salary_opening_accrued !== undefined) {
+    if (salary_opening_accrued === null || salary_opening_accrued === '') {
+      nextOpeningAccrued = 0;
+    } else {
+      nextOpeningAccrued = Number(salary_opening_accrued);
+      if (!Number.isFinite(nextOpeningAccrued) || nextOpeningAccrued < 0) {
+        return res.status(400).json({ error: 'salary_opening_accrued должен быть числом ≥ 0' });
+      }
+    }
+  }
+
   db.prepare('UPDATE users SET full_name = COALESCE(?, full_name), phone = ? WHERE id = ?').run(
     full_name ?? null,
     phone ?? null,
@@ -154,7 +178,14 @@ router.put('/:id', requireRole('admin'), (req, res) => {
          license_expiry = ?,
          medical_check_expiry = ?,
          is_active = COALESCE(?, is_active),
-         senior_shift_bonus = COALESCE(?, senior_shift_bonus)
+         senior_shift_bonus = COALESCE(?, senior_shift_bonus),
+         is_archived = COALESCE(?, is_archived),
+         salary_opening_accrued = COALESCE(?, salary_opening_accrued),
+         archived_at = CASE
+           WHEN ? IS NOT NULL AND ? = 1 THEN COALESCE(archived_at, datetime('now'))
+           WHEN ? IS NOT NULL AND ? = 0 THEN NULL
+           ELSE archived_at
+         END
      WHERE id = ?`
   ).run(
     car_number ?? null,
@@ -163,6 +194,12 @@ router.put('/:id', requireRole('admin'), (req, res) => {
     medical_check_expiry ?? null,
     is_active == null ? null : Number(Boolean(is_active)),
     nextSenior,
+    nextArchived,
+    nextOpeningAccrued,
+    nextArchived,
+    nextArchived,
+    nextArchived,
+    nextArchived,
     id
   );
   const updated = db.prepare(`${DRIVER_WITH_USER} WHERE d.id = ?`).get(id);

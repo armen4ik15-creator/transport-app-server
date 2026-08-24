@@ -307,6 +307,105 @@ function monthKeyFromIso(isoDate) {
   return `${date.getFullYear()}-${month}`;
 }
 
+function getDriverSalaryOpeningAccrued(db, driverId) {
+  if (!driverId) return 0;
+  try {
+    const row = db
+      .prepare(
+        `SELECT COALESCE(salary_opening_accrued, 0) AS salary_opening_accrued
+         FROM drivers WHERE id = ?`
+      )
+      .get(driverId);
+    return asNumber(row?.salary_opening_accrued);
+  } catch {
+    return 0;
+  }
+}
+
+function getDriverSalaryActivityDates(db, driverId) {
+  if (!driverId) {
+    return {
+      first_trip_date: null,
+      last_trip_date: null,
+      first_payment_date: null,
+      last_payment_date: null,
+    };
+  }
+
+  const tripRow = db
+    .prepare(
+      `SELECT
+         MIN(date(COALESCE(t.completed_at, t.created_at))) AS first_trip,
+         MAX(date(COALESCE(t.completed_at, t.created_at))) AS last_trip
+       FROM trips t
+       WHERE t.driver_id = ?
+         AND ${COMPLETED_TRIP_SQL}
+         AND ${SALARY_ELIGIBLE_TRIP_SQL}`
+    )
+    .get(driverId);
+
+  const payRow = db
+    .prepare(
+      `SELECT
+         MIN(date(COALESCE(p.period_start, p.created_at))) AS first_payment,
+         MAX(date(COALESCE(p.period_end, p.created_at))) AS last_payment
+       FROM driver_payments p
+       WHERE p.driver_id = ?
+         AND p.type IN ('salary', 'advance', 'bonus')`
+    )
+    .get(driverId);
+
+  return {
+    first_trip_date: asIsoDate(tripRow?.first_trip),
+    last_trip_date: asIsoDate(tripRow?.last_trip),
+    first_payment_date: asIsoDate(payRow?.first_payment),
+    last_payment_date: asIsoDate(payRow?.last_payment),
+  };
+}
+
+function buildDriverSalaryBalance(db, driverId, dateFrom, dateTo, options = {}) {
+  const periodStart = dateFrom ?? '1970-01-01';
+  const periodEnd = dateTo ?? '2099-12-31';
+  const includeOpening =
+    options.includeOpening !== false && periodStart <= '1970-01-02' && periodEnd >= '2099-12-30';
+
+  const grossTrips = calcDriverTripAccrued(db, driverId, periodStart, periodEnd);
+  const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
+  const seniorAllowance = calcDriverSeniorAllowance(db, driverId, periodStart, periodEnd);
+  const openingAccrued = includeOpening ? getDriverSalaryOpeningAccrued(db, driverId) : 0;
+  const gross = grossTrips + compensations + seniorAllowance + openingAccrued;
+  const deducted = calcDriverDeductions(db, driverId, periodStart, periodEnd);
+
+  const payments = db
+    .prepare(
+      `SELECT COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
+       FROM driver_payments
+       WHERE driver_id = ?
+         AND date(COALESCE(period_end, created_at)) >= date(?)
+         AND date(COALESCE(period_start, created_at)) <= date(?)`
+    )
+    .get(driverId, periodStart, periodEnd);
+
+  const paid = asNumber(payments?.paid);
+  const debt = gross - deducted - paid;
+
+  return {
+    period_start: periodStart,
+    period_end: periodEnd,
+    gross_trips: grossTrips,
+    compensations,
+    senior_allowance: seniorAllowance,
+    opening_accrued: openingAccrued,
+    gross,
+    paid,
+    deducted,
+    debt,
+    owed: debt > 0.01 ? debt : 0,
+    overpaid: debt < -0.01 ? Math.abs(debt) : 0,
+    ...(includeOpening ? getDriverSalaryActivityDates(db, driverId) : {}),
+  };
+}
+
 module.exports = {
   COMPLETED_TRIP_SQL,
   SALARY_ELIGIBLE_TRIP_SQL,
@@ -321,6 +420,9 @@ module.exports = {
   calcDriverPayouts,
   calcDriverSeniorAllowance,
   getDriverSeniorShiftBonus,
+  getDriverSalaryOpeningAccrued,
+  getDriverSalaryActivityDates,
+  buildDriverSalaryBalance,
   formatPeriodLabel,
   formatRuDate,
   monthBoundsFromIso,

@@ -19,6 +19,9 @@ export interface Driver {
   license_expiry: string | null;
   medical_check_expiry: string | null;
   is_active: number;
+  is_archived?: number;
+  salary_opening_accrued?: number;
+  archived_at?: string | null;
   senior_shift_bonus?: number;
   created_at: string;
 }
@@ -58,19 +61,36 @@ export interface EarningsSummary {
 
 export interface DriverListStats {
   totalTrips: number;
-  totalEarnings: number;
+  gross: number;
+  paid: number;
+  owed: number;
+  overpaid: number;
+  firstTripDate: string | null;
+  lastPaymentDate: string | null;
 }
 
 export interface Contractor {
   id: number;
   name: string;
-  type: string;
+  type: ContractorType;
   phone: string | null;
   address: string | null;
   opening_balance?: number;
   opening_balance_date?: string | null;
   created_by: number | null;
   created_at: string;
+}
+
+export type ContractorType = 'company' | 'individual' | 'gov';
+
+export interface ContractorDebtSummary {
+  contractor_id: number;
+  contractor_name: string;
+  opening_balance: number;
+  opening_balance_date: string | null;
+  accrued: number;
+  paid: number;
+  debt: number;
 }
 
 export interface Material {
@@ -141,6 +161,37 @@ export interface TripRecord {
   load_address?: string | null;
   unload_address?: string | null;
   contractor_name?: string | null;
+  task_name?: string | null;
+  company_rate?: number | null;
+  driver_rate?: number | null;
+}
+
+export interface TripSummary {
+  total_trips: number;
+  total_volume: number;
+  estimated_income: number;
+}
+
+export interface TripBackfillItem {
+  order_id: number;
+  ttn_number: string;
+  volume?: number | null;
+  trip_at: string;
+  note?: string | null;
+}
+
+export interface TripBackfillResponse {
+  created_count: number;
+  skipped_count: number;
+  created: Array<{
+    id: number;
+    ttn_number: string;
+    order_id: number;
+    driver_id: number;
+    created_by: number;
+    trip_at: string;
+  }>;
+  skipped: Array<{ ttn?: string; reason: string; trip_id?: number }>;
 }
 
 export interface OrderWithPhotos extends Order {
@@ -241,6 +292,11 @@ export interface CompanyCashSummary {
   fuel_fills?: number;
   fuel_card_topups?: number;
   estimated_fuel_card_balance?: number;
+  opening_fuel_card_balance?: number;
+  opening_fuel_card_date?: string | null;
+  ppr_topups?: number;
+  ppr_fills?: number;
+  estimated_ppr_balance?: number;
 }
 
 export interface CompanyCashSettings {
@@ -326,22 +382,39 @@ export interface DriverSalarySummary {
   gross_trips: number;
   senior_allowance: number;
   compensations: number;
+  opening_accrued?: number;
   paid: number;
   deducted: number;
   debt: number;
+  owed?: number;
+  overpaid?: number;
+  first_trip_date?: string | null;
+  last_trip_date?: string | null;
+  first_payment_date?: string | null;
+  last_payment_date?: string | null;
 }
 
 export interface DriverDebtSummary {
   driver_id: number;
   driver_name: string | null;
   driver_car_number?: string | null;
+  is_archived?: boolean;
+  is_active?: boolean;
+  calculation_scope?: string;
   gross: number;
   gross_trips: number;
   senior_allowance: number;
   compensations: number;
+  opening_accrued?: number;
   paid: number;
   deducted: number;
   debt: number;
+  owed: number;
+  overpaid: number;
+  first_trip_date?: string | null;
+  last_trip_date?: string | null;
+  first_payment_date?: string | null;
+  last_payment_date?: string | null;
 }
 
 export interface DriverAccruedPreview {
@@ -353,4 +426,70 @@ export interface DriverAccruedPreview {
   compensations: number;
   deductions: number;
   net: number;
+}
+
+export type SalaryLedgerKind = 'accrual' | 'payout' | 'note' | 'section';
+
+export interface SalaryLedgerLine {
+  line_no: number;
+  kind: SalaryLedgerKind;
+  category: string;
+  date: string | null;
+  description: string;
+  accrued: number | null;
+  paid: number | null;
+  balance: number;
+}
+
+export interface SalaryStatementTrip {
+  id: number;
+  trip_date: string;
+  order_id: number;
+  ttn_number: string | null;
+  material: string | null;
+  contractor_name: string | null;
+  load_address: string | null;
+  unload_address: string | null;
+  volume: number | null;
+  driver_rate: number;
+  counted_in_salary: boolean;
+  exclude_reason: string | null;
+}
+
+export interface SalaryStatementPayment {
+  id: number;
+  type: DriverPaymentType;
+  amount: number;
+  method: DriverPaymentMethod | null;
+  note: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  created_at: string;
+  category: string;
+}
+
+export interface SalaryStatementTotals {
+  accrued: number;
+  paid: number;
+  deducted: number;
+  debt: number;
+  trips_accrued: number;
+  trips_excluded: number;
+  trips_counted_count: number;
+  trips_excluded_count: number;
+  senior_allowance: number;
+  compensations: number;
+}
+
+export interface DriverSalaryStatement {
+  driver_id: number;
+  driver_name: string | null;
+  driver_car_number: string | null;
+  from: string;
+  to: string;
+  period_label: string;
+  totals: SalaryStatementTotals;
+  ledger: SalaryLedgerLine[];
+  trips: SalaryStatementTrip[];
+  payments: SalaryStatementPayment[];
 }

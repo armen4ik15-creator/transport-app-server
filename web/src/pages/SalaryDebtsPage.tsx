@@ -30,7 +30,8 @@ export function SalaryDebtsPage() {
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
-      if (onlyWithDebt && row.debt <= 0.01) return false;
+      const owed = row.owed ?? Math.max(0, row.debt);
+      if (onlyWithDebt && owed <= 0.01) return false;
       return true;
     });
   }, [onlyWithDebt, rows]);
@@ -40,11 +41,11 @@ export function SalaryDebtsPage() {
   const pageRows = paginateItems(filteredRows, safePage);
 
   const totals = useMemo(() => {
-    const withDebt = rows.filter((row) => row.debt > 0.01);
+    const withDebt = rows.filter((row) => (row.owed ?? Math.max(0, row.debt)) > 0.01);
     return {
       gross: rows.reduce((sum, row) => sum + row.gross, 0),
       paid: rows.reduce((sum, row) => sum + row.paid, 0),
-      debt: withDebt.reduce((sum, row) => sum + row.debt, 0),
+      debt: withDebt.reduce((sum, row) => sum + (row.owed ?? Math.max(0, row.debt)), 0),
       driversWithDebt: withDebt.length,
     };
   }, [rows]);
@@ -82,7 +83,7 @@ export function SalaryDebtsPage() {
       <div className="page-header">
         <div>
           <h2>Долги ({filteredRows.length})</h2>
-          <p className="muted">Сводная задолженность по всем водителям (за всё время).</p>
+          <p className="muted">Задолженность по всем неархивным водителям. Период: всё время (рейсы с фото + выплаты).</p>
         </div>
         <button type="button" className="btn-secondary" onClick={onRefresh} disabled={refreshing}>
           {refreshing ? 'Обновление…' : 'Обновить'}
@@ -136,7 +137,10 @@ export function SalaryDebtsPage() {
                 key: 'driver',
                 header: 'Водитель',
                 render: (row) => (
-                  <Link to={`/drivers/${row.driver_id}`} className="table-link">
+                  <Link
+                    to={`/salary/drivers/${row.driver_id}`}
+                    className="table-link"
+                  >
                     {row.driver_name ?? `#${row.driver_id}`}
                   </Link>
                 ),
@@ -153,13 +157,13 @@ export function SalaryDebtsPage() {
               },
               {
                 key: 'debt',
-                header: 'Долг',
-                render: (row) => formatMoney(row.debt),
+                header: 'К выплате',
+                render: (row) => formatMoney(row.owed ?? Math.max(0, row.debt)),
               },
               {
                 key: 'status',
                 header: 'Статус',
-                render: (row) => accrualStatusLabel(row.debt),
+                render: (row) => accrualStatusLabel(row.owed ?? row.debt),
               },
             ]}
           />

@@ -25,6 +25,8 @@ export interface DriverUpdatePayload {
   medical_check_expiry?: string | null;
   is_active?: boolean;
   senior_shift_bonus?: number | null;
+  is_archived?: boolean;
+  salary_opening_accrued?: number | null;
 }
 
 export async function listDrivers(): Promise<Driver[]> {

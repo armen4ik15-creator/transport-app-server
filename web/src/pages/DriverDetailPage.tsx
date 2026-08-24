@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { getDriverBalance } from '../api/balances';
 import { getDriverById, updateDriver } from '../api/drivers';
 import { getEarningsSummary } from '../api/earnings';
+import { getSalarySummary } from '../api/salary';
 import { apiErrorMessage } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { DataTable } from '../components/DataTable';
 import { DriverSalarySection } from '../components/DriverSalarySection';
 import { driverStatusLabel } from '../utils/driverFilters';
+import { formatDriverOwed, formatSalaryPeriodHint } from '../utils/driverSalaryDisplay';
 import { formatMoney } from '../utils/pagination';
-import type { Driver, DriverBalance, EarningsSummary } from '../types';
+import type { Driver, DriverSalarySummary, EarningsSummary } from '../types';
 
 export function DriverDetailPage() {
   const { id: idParam } = useParams();
@@ -18,12 +19,14 @@ export function DriverDetailPage() {
 
   const [driver, setDriver] = useState<Driver | null>(null);
   const [summary, setSummary] = useState<EarningsSummary | null>(null);
-  const [balance, setBalance] = useState<DriverBalance | null>(null);
+  const [salarySummary, setSalarySummary] = useState<DriverSalarySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [confirmActivate, setConfirmActivate] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmUnarchive, setConfirmUnarchive] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'salary'>('overview');
 
   const load = useCallback(async () => {
@@ -40,12 +43,12 @@ export function DriverDetailPage() {
     }
     setDriver(found);
 
-    const [earnings, driverBalance] = await Promise.all([
+    const [earnings, salary] = await Promise.all([
       getEarningsSummary({ driver_id: id }),
-      getDriverBalance(id),
+      getSalarySummary(id, { from: '1970-01-01', to: '2099-12-31' }),
     ]);
     setSummary(earnings);
-    setBalance(driverBalance);
+    setSalarySummary(salary);
   }, [id]);
 
   useEffect(() => {
@@ -53,6 +56,28 @@ export function DriverDetailPage() {
       .catch((err) => setError(apiErrorMessage(err, 'Не удалось загрузить карточку')))
       .finally(() => setLoading(false));
   }, [load]);
+
+  const onToggleArchive = async (nextArchived: boolean) => {
+    if (!driver) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await updateDriver(driver.id, {
+        is_archived: nextArchived,
+        is_active: nextArchived ? false : Boolean(driver.is_active),
+      });
+      setDriver(updated);
+      toast.success(nextArchived ? 'Водитель перенесён в архив' : 'Водитель восстановлен из архива');
+    } catch (err) {
+      const message = apiErrorMessage(err, 'Не удалось изменить архив');
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+      setConfirmArchive(false);
+      setConfirmUnarchive(false);
+    }
+  };
 
   const onToggleActive = async (nextActive: boolean) => {
     if (!driver) return;
@@ -96,7 +121,7 @@ export function DriverDetailPage() {
         <div>
           <h2>{driver.full_name ?? 'Без имени'}</h2>
           <p className="muted">
-            #{driver.id} · {driverStatusLabel(driver.is_active)} · {driver.email}
+            #{driver.id} · {driverStatusLabel(driver.is_active, driver.is_archived)} · {driver.email}
           </p>
         </div>
         <Link to="/drivers" className="btn-secondary link-btn">
@@ -146,28 +171,74 @@ export function DriverDetailPage() {
             Восстановить
           </button>
         )}
+        {driver.is_archived ? (
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={busy}
+            onClick={() => setConfirmUnarchive(true)}
+          >
+            Вернуть из архива
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={busy}
+            onClick={() => setConfirmArchive(true)}
+          >
+            В архив
+          </button>
+        )}
       </div>
 
       {activeTab === 'overview' ? (
         <>
           <div className="stats-grid">
             <article className="card stat-card">
-              <p className="muted small">Рейсов</p>
-              <strong>{summary?.total_trips ?? 0}</strong>
+              <p className="muted small">Рейсов в ЗП</p>
+              <strong>{salarySummary?.gross_trips ?? summary?.eligible_trips ?? 0}</strong>
             </article>
             <article className="card stat-card">
-              <p className="muted small">Заработок (оценка)</p>
-              <strong>{formatMoney(summary?.total_earnings ?? summary?.estimated_income ?? 0)}</strong>
+              <p className="muted small">Начислено (всё время)</p>
+              <strong>{formatMoney(salarySummary?.gross ?? 0)}</strong>
             </article>
             <article className="card stat-card">
-              <p className="muted small">Баланс (финансы)</p>
-              <strong>{formatMoney(balance?.balance ?? 0)}</strong>
+              <p className="muted small">Выплачено</p>
+              <strong>{formatMoney(salarySummary?.paid ?? 0)}</strong>
             </article>
             <article className="card stat-card">
-              <p className="muted small">Объём, м³</p>
-              <strong>{summary?.total_volume ?? 0}</strong>
+              <p className="muted small">К выплате</p>
+              <strong>{formatDriverOwed(salarySummary?.owed ?? Math.max(0, salarySummary?.debt ?? 0))}</strong>
             </article>
           </div>
+
+          {salarySummary ? (
+            <article className="card detail-block">
+              <h3>Зарплата за всё время</h3>
+              <p className="muted small">
+                {formatSalaryPeriodHint(salarySummary.first_trip_date, salarySummary.last_payment_date)}
+              </p>
+              <p>
+                <strong>Рейсы:</strong> {formatMoney(salarySummary.gross_trips ?? 0)}
+                {(salarySummary.senior_allowance ?? 0) > 0
+                  ? ` · надбавки: ${formatMoney(salarySummary.senior_allowance ?? 0)}`
+                  : ''}
+                {(salarySummary.compensations ?? 0) > 0
+                  ? ` · компенсации: ${formatMoney(salarySummary.compensations ?? 0)}`
+                  : ''}
+                {(salarySummary.opening_accrued ?? 0) > 0
+                  ? ` · ручное: ${formatMoney(salarySummary.opening_accrued ?? 0)}`
+                  : ''}
+              </p>
+              {(salarySummary.overpaid ?? 0) > 0.01 ? (
+                <p className="error small">
+                  Переплата {formatMoney(salarySummary.overpaid ?? 0)} — выплат больше, чем начислений в
+                  системе. Проверьте рейсы с фото и выплаты.
+                </p>
+              ) : null}
+            </article>
+          ) : null}
 
           <article className="card detail-block">
             <h3>Данные водителя</h3>
@@ -266,6 +337,26 @@ export function DriverDetailPage() {
         busy={busy}
         onConfirm={() => onToggleActive(true)}
         onCancel={() => setConfirmActivate(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmArchive}
+        title="Перенести в архив?"
+        message="Водитель скроется из основного списка и расчёта долгов. История выплат и рейсов сохранится."
+        confirmLabel="В архив"
+        busy={busy}
+        onConfirm={() => onToggleArchive(true)}
+        onCancel={() => setConfirmArchive(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmUnarchive}
+        title="Вернуть из архива?"
+        message="Водитель снова появится в списке и в расчёте зарплаты."
+        confirmLabel="Вернуть"
+        busy={busy}
+        onConfirm={() => onToggleArchive(false)}
+        onCancel={() => setConfirmUnarchive(false)}
       />
     </section>
   );

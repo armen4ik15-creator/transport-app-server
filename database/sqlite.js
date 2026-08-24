@@ -427,6 +427,9 @@ function migrate(db) {
   ensureColumn(db, 'drivers', 'is_active', 'is_active INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'drivers', 'car_number', 'car_number TEXT');
   ensureColumn(db, 'drivers', 'senior_shift_bonus', 'senior_shift_bonus REAL NOT NULL DEFAULT 0');
+  ensureColumn(db, 'drivers', 'is_archived', 'is_archived INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'drivers', 'salary_opening_accrued', 'salary_opening_accrued REAL NOT NULL DEFAULT 0');
+  ensureColumn(db, 'drivers', 'archived_at', 'archived_at TEXT');
   ensureColumn(db, 'contractors', 'type', `type TEXT NOT NULL DEFAULT 'company'`);
   ensureColumn(db, 'contractors', 'created_by', 'created_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
   ensureColumn(db, 'contractors', 'opening_balance', 'opening_balance REAL NOT NULL DEFAULT 0');

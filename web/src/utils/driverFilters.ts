@@ -1,15 +1,21 @@
 import type { Driver, DriverListStats } from '../types';
 
 export type DriverStatusFilter = 'all' | 'active' | 'inactive';
+export type DriverArchiveFilter = 'hide' | 'only' | 'all';
 
 export function filterDrivers(
   drivers: Driver[],
   query: string,
-  status: DriverStatusFilter
+  status: DriverStatusFilter,
+  archive: DriverArchiveFilter = 'hide'
 ): Driver[] {
   const normalizedQuery = query.trim().toLowerCase();
 
   return drivers.filter((driver) => {
+    const archived = Boolean(driver.is_archived);
+    if (archive === 'hide' && archived) return false;
+    if (archive === 'only' && !archived) return false;
+
     if (status === 'active' && !driver.is_active) return false;
     if (status === 'inactive' && driver.is_active) return false;
 
@@ -30,7 +36,8 @@ export function filterDrivers(
   });
 }
 
-export function driverStatusLabel(isActive: number): string {
+export function driverStatusLabel(isActive: number, isArchived?: number): string {
+  if (isArchived) return 'Архив';
   return isActive ? 'Активен' : 'Неактивен';
 }
 
@@ -38,5 +45,15 @@ export function mergeDriverStats(
   driverId: number,
   statsMap: Record<number, DriverListStats>
 ): DriverListStats {
-  return statsMap[driverId] ?? { totalTrips: 0, totalEarnings: 0 };
+  return (
+    statsMap[driverId] ?? {
+      totalTrips: 0,
+      gross: 0,
+      paid: 0,
+      owed: 0,
+      overpaid: 0,
+      firstTripDate: null,
+      lastPaymentDate: null,
+    }
+  );
 }

@@ -2,10 +2,7 @@ const express = require('express');
 const db = require('../database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const {
-  calcDriverCompensations,
-  calcDriverDeductions,
-  calcDriverTripAccrued,
-  calcDriverSeniorAllowance,
+  buildDriverSalaryBalance,
   parseIsoDate,
   resolvePaymentPeriod,
 } = require('../utils/salaryCalculations');
@@ -210,37 +207,15 @@ router.get('/summary', async (req, res) => {
     const periodStart = from ?? '1970-01-01';
     const periodEnd = to ?? '2099-12-31';
 
-    const grossTrips = calcDriverTripAccrued(db, driverId, periodStart, periodEnd);
-    const compensations = calcDriverCompensations(db, driverId, periodStart, periodEnd);
-    const seniorAllowance = calcDriverSeniorAllowance(db, driverId, periodStart, periodEnd);
-    const gross = grossTrips + compensations + seniorAllowance;
-    const deducted = calcDriverDeductions(db, driverId, periodStart, periodEnd);
-
-    const payments = db
-      .prepare(
-        `SELECT
-           COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
-         FROM driver_payments
-         WHERE driver_id = ?
-           AND date(COALESCE(period_end, created_at)) >= date(?)
-           AND date(COALESCE(period_start, created_at)) <= date(?)`
-      )
-      .get(driverId, periodStart, periodEnd);
-
-    const paid = Number(payments.paid || 0);
-    const debt = gross - deducted - paid;
+    const balance = buildDriverSalaryBalance(db, driverId, periodStart, periodEnd, {
+      includeOpening: periodStart <= '1970-01-02' && periodEnd >= '2099-12-30',
+    });
 
     return res.json({
       driver_id: driverId,
       from: periodStart,
       to: periodEnd,
-      gross,
-      gross_trips: grossTrips,
-      senior_allowance: seniorAllowance,
-      compensations,
-      paid,
-      deducted,
-      debt,
+      ...balance,
     });
   } catch (error) {
     console.error('[salary/summary]', error);
@@ -248,11 +223,18 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-router.get('/debts', async (_req, res) => {
+router.get('/debts', async (req, res) => {
   try {
+    const includeArchived = req.query.include_archived === '1';
+
     const drivers = db
       .prepare(
-        `SELECT d.id AS driver_id, u.full_name AS driver_name, d.car_number AS driver_car_number
+        `SELECT
+           d.id AS driver_id,
+           u.full_name AS driver_name,
+           d.car_number AS driver_car_number,
+           COALESCE(d.is_archived, 0) AS is_archived,
+           COALESCE(d.is_active, 0) AS is_active
          FROM drivers d
          JOIN users u ON u.id = d.user_id
          ORDER BY u.full_name ASC`
@@ -261,46 +243,22 @@ router.get('/debts', async (_req, res) => {
 
     const rows = [];
     for (const driver of drivers) {
-      const grossTrips = calcDriverTripAccrued(db, driver.driver_id, '1970-01-01', '2099-12-31');
-      const compensations = calcDriverCompensations(
-        db,
-        driver.driver_id,
-        '1970-01-01',
-        '2099-12-31'
-      );
-      const seniorAllowance = calcDriverSeniorAllowance(
-        db,
-        driver.driver_id,
-        '1970-01-01',
-        '2099-12-31'
-      );
-      const gross = grossTrips + compensations + seniorAllowance;
-      const deducted = calcDriverDeductions(db, driver.driver_id, '1970-01-01', '2099-12-31');
-      const payments = db
-        .prepare(
-          `SELECT COALESCE(SUM(CASE WHEN type IN ('salary','advance','bonus') THEN amount END), 0) AS paid
-           FROM driver_payments
-           WHERE driver_id = ?`
-        )
-        .get(driver.driver_id);
-      const paid = Number(payments.paid || 0);
-      const debt = gross - deducted - paid;
+      if (!includeArchived && Number(driver.is_archived) === 1) continue;
+
+      const balance = buildDriverSalaryBalance(db, driver.driver_id, '1970-01-01', '2099-12-31');
 
       rows.push({
         driver_id: driver.driver_id,
         driver_name: driver.driver_name,
         driver_car_number: driver.driver_car_number,
-        gross,
-        gross_trips: grossTrips,
-        senior_allowance: seniorAllowance,
-        compensations,
-        paid,
-        deducted,
-        debt,
+        is_archived: Number(driver.is_archived) === 1,
+        is_active: Number(driver.is_active) === 1,
+        calculation_scope: 'all_time',
+        ...balance,
       });
     }
 
-    rows.sort((a, b) => b.debt - a.debt || String(a.driver_name).localeCompare(String(b.driver_name)));
+    rows.sort((a, b) => b.owed - a.owed || b.debt - a.debt || String(a.driver_name).localeCompare(String(b.driver_name)));
     return res.json(rows);
   } catch (error) {
     console.error('[salary/debts]', error);
