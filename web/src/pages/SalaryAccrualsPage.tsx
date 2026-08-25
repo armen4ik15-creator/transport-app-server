@@ -21,6 +21,13 @@ import type { Driver, DriverSalarySummary } from '../types';
 interface AccrualRow extends DriverSalarySummary {
   driver_name: string | null;
   driver_car_number: string | null;
+  is_active: boolean;
+}
+
+/** Неактивные без начислений за период (выездной мастер и т.п.) — не в вахтовой ЗП. */
+function isPayrollRelevantForPeriod(row: AccrualRow): boolean {
+  if (row.is_active) return true;
+  return row.gross > 0.01;
 }
 
 function buildDraftFromParams(
@@ -92,11 +99,12 @@ export function SalaryAccrualsPage() {
             ...summary,
             driver_name: driver.full_name,
             driver_car_number: driver.car_number,
+            is_active: Boolean(driver.is_active),
           } satisfies AccrualRow;
         })
       );
 
-      setRows(summaries);
+      setRows(summaries.filter(isPayrollRelevantForPeriod));
     },
     [drivers]
   );
@@ -218,8 +226,8 @@ export function SalaryAccrualsPage() {
         <div>
           <h2>Начисления ({filteredRows.length})</h2>
           <p className="muted">
-            Начисления за выбранную вахту или месяц. Клик по водителю — ведомость. Общий баланс за
-            всё время — в{' '}
+            Начисления за вахту/месяц по водителям с рейсами. Неактивные без начислений (например
+            выездной мастер) скрыты — их оплату учитывайте как расход «услуги». Общий баланс — в{' '}
             <Link to="/salary/debts" className="table-link">
               Долгах
             </Link>
