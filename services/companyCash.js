@@ -216,11 +216,16 @@ function getCompanyCashSummary() {
       onlyTypes: ['fuel_card'],
       commentNotLike: '[ppr-topup-',
     });
-    pprTopups = sumExpensesSince(fuelOpeningDate, {
+  }
+
+  // ППР не завязан на дату сверки ГПН: иначе срез ЛК Opti обнуляет кошелёк ППР.
+  const pprOpeningDate = openingDate || fuelOpeningDate;
+  if (pprOpeningDate) {
+    pprTopups = sumExpensesSince(pprOpeningDate, {
       onlyTypes: ['fuel_card'],
       commentLike: '[ppr-topup-',
     });
-    pprFills = sumExpensesSince(fuelOpeningDate, {
+    pprFills = sumExpensesSince(pprOpeningDate, {
       onlyTypes: ['fuel'],
       commentLike: '[ppr-fuel-',
     });
